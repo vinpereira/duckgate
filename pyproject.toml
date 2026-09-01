@@ -1,0 +1,43 @@
+[project]
+name = "duckgate"
+dynamic = ["version"]
+description = "Interactive SQL shell over S3 data using DuckDB"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.11"
+dependencies = [
+    "duckdb>=1.0.0",
+    "boto3>=1.34.0",
+    "click>=8.1.0",
+    "prompt-toolkit>=3.0.0",
+]
+
+[project.scripts]
+duckgate = "duckgate.cli:cli"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "duckgate/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["duckgate"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "moto[s3,glue]>=5.0.0",
+    "pyarrow>=14.0.0",
+    "ruff>=0.6.0",
+]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
