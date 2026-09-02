@@ -4,8 +4,12 @@ Interactive SQL shell over S3 data (Parquet, Iceberg, CSV) using DuckDB.
 
 ## Install
 
+`duckgate` is a CLI tool, so an isolated install is recommended over a bare `pip install`:
+
 ```bash
-pip install duckgate
+uv tool install duckgate
+# or
+pipx install duckgate
 ```
 
 ## Quick start
@@ -66,6 +70,12 @@ uv run pytest
 uv run ruff check --fix .
 uv run ruff format .
 ```
+
+## Release
+
+Pushing a `v*` tag (e.g. `v0.1.0`) builds and publishes to PyPI via GitHub Actions, using
+PyPI Trusted Publishing (see `.github/workflows/publish.yml`). Bump `__version__` in
+`duckgate/__init__.py` to match before tagging.
 
 ## License
 

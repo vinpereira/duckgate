@@ -18,3 +18,4 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `table`/`csv`/`json` output.
 - Interactive SQL shell (`prompt_toolkit`).
 - Apache License 2.0.
+- GitHub Actions workflow to publish to PyPI via Trusted Publishing on `v*` tags.
