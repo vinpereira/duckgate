@@ -1,6 +1,7 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
+from botocore.credentials import Credentials, ReadOnlyCredentials
 from click.testing import CliRunner
 
 import duckgate
@@ -21,12 +22,12 @@ def config_toml(tmp_path, monkeypatch):
 
 
 def _mock_session_no_glue():
-    creds = MagicMock()
-    creds.access_key = "AKIATEST"
-    creds.secret_key = "secret"
-    creds.token = None
+    creds = MagicMock(spec=Credentials)
+    creds.get_frozen_credentials.return_value = ReadOnlyCredentials(
+        access_key="AKIATEST", secret_key="secret", token=None, account_id=None
+    )
     session = MagicMock()
-    session.get_credentials.return_value.resolve.return_value = creds
+    session.get_credentials.return_value = creds
     return session
 
 
