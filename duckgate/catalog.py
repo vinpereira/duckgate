@@ -16,6 +16,9 @@ def register_local_tables(
 
 
 def _make_view_sql(name: str, path: str, format: str) -> str:
+    # Glue database/table names often contain hyphens, which DuckDB's unquoted
+    # identifier syntax parses as the subtraction operator — always quote.
+    name = '"' + name.replace('"', '""') + '"'
     if format == "iceberg":
         return f"CREATE OR REPLACE VIEW {name} AS SELECT * FROM iceberg_scan('{path}')"
     path = _with_glob(path, format)

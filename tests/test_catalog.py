@@ -14,9 +14,16 @@ from duckgate.config import AwsConfig, Config, GlueConfig, TableConfig
 
 def test_make_view_sql_parquet():
     sql = _make_view_sql("my_table", "s3://bucket/prefix/**/*.parquet", "parquet")
-    assert "CREATE OR REPLACE VIEW my_table" in sql
+    assert 'CREATE OR REPLACE VIEW "my_table"' in sql
     assert "read_parquet" in sql
     assert "s3://bucket/prefix/**/*.parquet" in sql
+
+
+def test_make_view_sql_quotes_hyphenated_name():
+    # Glue database/table names commonly contain hyphens, which DuckDB's
+    # unquoted identifier syntax parses as the subtraction operator
+    sql = _make_view_sql("gate-nonprod-eu-db__my-table", "s3://bucket/prefix/*.parquet", "parquet")
+    assert '"gate-nonprod-eu-db__my-table"' in sql
 
 
 def test_make_view_sql_iceberg():
@@ -99,6 +106,35 @@ def test_register_local_tables_returns_names(duck_conn, sample_parquet_bytes, mo
     assert registered == ["test_table"]
 
     count = duck_conn.execute("SELECT COUNT(*) FROM test_table").fetchone()[0]
+    assert count == 3
+
+
+def test_register_local_tables_with_hyphenated_name(duck_conn, sample_parquet_bytes, moto_server):
+    s3 = boto3.client(
+        "s3",
+        region_name="eu-central-1",
+        endpoint_url=f"http://{moto_server}",
+        aws_access_key_id="test",
+        aws_secret_access_key="test",
+    )
+    s3.create_bucket(
+        Bucket="hyphen-bucket",
+        CreateBucketConfiguration={"LocationConstraint": "eu-central-1"},
+    )
+    s3.put_object(Bucket="hyphen-bucket", Key="data/file.parquet", Body=sample_parquet_bytes)
+    _configure_duck_s3(duck_conn, moto_server)
+
+    tables = [
+        TableConfig(
+            name="gate-nonprod-eu-db__my-table",
+            path="s3://hyphen-bucket/data/*.parquet",
+            format="parquet",
+        )
+    ]
+    registered = register_local_tables(duck_conn, tables)
+    assert registered == ["gate-nonprod-eu-db__my-table"]
+
+    count = duck_conn.execute('SELECT COUNT(*) FROM "gate-nonprod-eu-db__my-table"').fetchone()[0]
     assert count == 3
 
 

@@ -12,6 +12,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Enter accepts it) instead of always writing `./duckgate.toml`. Pass `-p`/`--path` to skip
   the prompt for scripts and CI.
 
+### Fixed
+
+- Quote view names in `CREATE VIEW` — Glue database/table names commonly contain hyphens,
+  which DuckDB's unquoted identifier syntax parsed as subtraction, breaking every hyphenated
+  Glue table.
+
 ## [0.1.0] - 2026-09-02
 
 ### Added
