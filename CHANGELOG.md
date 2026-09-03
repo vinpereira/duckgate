@@ -15,6 +15,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   i/N`) on stderr — with many Glue tables, each one binds its schema over the network, which
   can take a while with no feedback otherwise. Kept to one line so it doesn't duplicate the
   table list `duckgate tables` already prints at the end.
+- Enabled DuckDB's native progress bar (`PRAGMA enable_progress_bar`) for query execution —
+  only shows up past the 2s default threshold, so it stays quiet during fast catalog
+  registration but gives feedback on slow scans in `-q` and the interactive shell.
 
 ### Fixed
 

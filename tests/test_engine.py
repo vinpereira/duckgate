@@ -49,3 +49,13 @@ def test_create_connection_without_session_token(minimal_config):
         conn = create_connection(minimal_config)
     assert isinstance(conn, duckdb.DuckDBPyConnection)
     conn.close()
+
+
+def test_create_connection_enables_progress_bar(minimal_config):
+    mock_session = MagicMock()
+    mock_session.get_credentials.return_value = _mock_credentials()
+    with patch("duckgate.engine.boto3.Session", return_value=mock_session):
+        conn = create_connection(minimal_config)
+    result = conn.execute("SELECT current_setting('enable_progress_bar')").fetchone()[0]
+    assert result is True
+    conn.close()
