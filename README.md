@@ -15,15 +15,19 @@ pipx install duckgate
 ## Quick start
 
 ```bash
-duckgate init          # create duckgate.toml in current directory
+duckgate init          # prompts for a config path (default: ~/.duckgate/config.toml)
 duckgate tables        # list available tables
 duckgate               # open interactive shell
 duckgate -q "SELECT COUNT(*) FROM my_table"  # one-shot query
 ```
 
+`duckgate init` accepts Enter to take the suggested default, or a path you type (e.g. a local
+`duckgate.toml` for a per-project override). Pass `-p`/`--path` to skip the prompt entirely —
+handy in scripts: `duckgate init --path duckgate.toml`.
+
 ## Configuration
 
-`duckgate.toml` (current directory) or `~/.duckgate/config.toml`:
+`duckgate.toml` in the current directory, falling back to `~/.duckgate/config.toml`:
 
 ```toml
 [aws]

@@ -73,12 +73,26 @@ def tables():
 
 
 @cli.command("init")
-def init_cmd():
-    """Create a duckgate.toml template in the current directory."""
-    path = Path("duckgate.toml")
+@click.option(
+    "-p",
+    "--path",
+    "path_str",
+    default=None,
+    help="Config file path (skips the interactive prompt)",
+)
+def init_cmd(path_str):
+    """Create a duckgate.toml config template."""
+    if path_str:
+        path = Path(path_str)
+    else:
+        default = Path.home() / ".duckgate" / "config.toml"
+        path = Path(click.prompt("Config file path", default=str(default)))
+
     if path.exists():
-        click.echo("duckgate.toml already exists", err=True)
+        click.echo(f"{path} already exists", err=True)
         raise SystemExit(1)
+
+    path.parent.mkdir(parents=True, exist_ok=True)
     template = (
         "[aws]\n"
         'profile = "my-aws-profile"\n'

@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- `duckgate init` now prompts for the config path (default `~/.duckgate/config.toml`,
+  Enter accepts it) instead of always writing `./duckgate.toml`. Pass `-p`/`--path` to skip
+  the prompt for scripts and CI.
+
+## [0.1.0] - 2026-09-02
+
 ### Added
 
 - Project scaffold: `hatchling` build backend, Click entry point, `ruff` linting.

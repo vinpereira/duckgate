@@ -61,7 +61,7 @@ def test_tables_command_empty(runner, config_toml):
 
 def test_init_command_creates_file(runner, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    result = runner.invoke(cli, ["init"])
+    result = runner.invoke(cli, ["init", "--path", "duckgate.toml"])
     assert result.exit_code == 0
     assert (tmp_path / "duckgate.toml").exists()
     content = (tmp_path / "duckgate.toml").read_text()
@@ -72,8 +72,27 @@ def test_init_command_creates_file(runner, tmp_path, monkeypatch):
 def test_init_command_refuses_overwrite(runner, tmp_path, monkeypatch):
     (tmp_path / "duckgate.toml").write_text("[aws]\nprofile='x'\nregion='y'\n")
     monkeypatch.chdir(tmp_path)
-    result = runner.invoke(cli, ["init"])
+    result = runner.invoke(cli, ["init", "--path", "duckgate.toml"])
     assert result.exit_code != 0
+
+
+def test_init_command_prompts_with_home_default(runner, tmp_path, monkeypatch):
+    monkeypatch.setattr("duckgate.cli.Path.home", lambda: tmp_path)
+    result = runner.invoke(cli, ["init"], input="\n")
+    assert result.exit_code == 0
+    expected = tmp_path / ".duckgate" / "config.toml"
+    assert f"[{expected}]" in result.output
+    assert expected.exists()
+    assert "[aws]" in expected.read_text()
+
+
+def test_init_command_prompt_accepts_custom_path(runner, tmp_path, monkeypatch):
+    monkeypatch.setattr("duckgate.cli.Path.home", lambda: tmp_path)
+    custom = tmp_path / "custom.toml"
+    result = runner.invoke(cli, ["init"], input=f"{custom}\n")
+    assert result.exit_code == 0
+    assert custom.exists()
+    assert not (tmp_path / ".duckgate" / "config.toml").exists()
 
 
 def test_one_shot_query_table_format(runner, config_toml):
