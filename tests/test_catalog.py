@@ -138,6 +138,33 @@ def test_register_local_tables_with_hyphenated_name(duck_conn, sample_parquet_by
     assert count == 3
 
 
+def test_register_local_tables_skips_table_with_no_matching_files(
+    duck_conn, sample_parquet_bytes, moto_server, capsys
+):
+    s3 = boto3.client(
+        "s3",
+        region_name="eu-central-1",
+        endpoint_url=f"http://{moto_server}",
+        aws_access_key_id="test",
+        aws_secret_access_key="test",
+    )
+    s3.create_bucket(
+        Bucket="empty-bucket",
+        CreateBucketConfiguration={"LocationConstraint": "eu-central-1"},
+    )
+    s3.put_object(Bucket="empty-bucket", Key="data/file.parquet", Body=sample_parquet_bytes)
+    _configure_duck_s3(duck_conn, moto_server)
+
+    tables = [
+        TableConfig(name="empty_table", path="s3://empty-bucket/nothing-here/*.parquet"),
+        TableConfig(name="good_table", path="s3://empty-bucket/data/*.parquet"),
+    ]
+    registered = register_local_tables(duck_conn, tables)
+
+    assert registered == ["good_table"]
+    assert "empty_table" in capsys.readouterr().err
+
+
 def _glue_table_input(name, location, input_format=""):
     return {
         "Name": name,
@@ -202,6 +229,44 @@ def test_register_glue_tables_parquet(duck_conn, moto_server, sample_parquet_byt
     assert "locations" in registered
     count = duck_conn.execute("SELECT COUNT(*) FROM locations").fetchone()[0]
     assert count == 3
+
+
+@mock_aws
+def test_register_glue_tables_skips_table_with_no_matching_files(
+    duck_conn, moto_server, sample_parquet_bytes, capsys
+):
+    glue = boto3.client("glue", region_name="eu-central-1")
+    glue.create_database(DatabaseInput={"Name": "my_db"})
+    glue.create_table(
+        DatabaseName="my_db",
+        TableInput=_glue_table_input("empty_dev_table", "s3://bucket2/nothing-here/"),
+    )
+    glue.create_table(
+        DatabaseName="my_db",
+        TableInput=_glue_table_input("good_table", "s3://bucket2/data/"),
+    )
+
+    s3 = boto3.client(
+        "s3",
+        region_name="eu-central-1",
+        endpoint_url=f"http://{moto_server}",
+        aws_access_key_id="test",
+        aws_secret_access_key="test",
+    )
+    s3.create_bucket(
+        Bucket="bucket2", CreateBucketConfiguration={"LocationConstraint": "eu-central-1"}
+    )
+    s3.put_object(Bucket="bucket2", Key="data/part-0.parquet", Body=sample_parquet_bytes)
+    _configure_duck_s3(duck_conn, moto_server)
+
+    config = Config(
+        aws=AwsConfig(profile="test", region="eu-central-1"),
+        glue=GlueConfig(enabled=True, databases=["my_db"]),
+    )
+    registered = _register_glue(duck_conn, config, already_registered=[])
+
+    assert registered == ["good_table"]
+    assert "empty_dev_table" in capsys.readouterr().err
 
 
 @mock_aws

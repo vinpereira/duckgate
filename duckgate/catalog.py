@@ -1,4 +1,5 @@
 import boto3
+import click
 import duckdb
 
 from duckgate.config import Config, TableConfig
@@ -10,9 +11,19 @@ def register_local_tables(
 ) -> list[str]:
     registered: list[str] = []
     for table in tables:
-        conn.execute(_make_view_sql(table.name, table.path, table.format))
+        if not _try_register(conn, table.name, table.path, table.format):
+            continue
         registered.append(table.name)
     return registered
+
+
+def _try_register(conn: duckdb.DuckDBPyConnection, name: str, path: str, fmt: str) -> bool:
+    try:
+        conn.execute(_make_view_sql(name, path, fmt))
+    except duckdb.Error as e:
+        click.echo(f"Warning: skipping table '{name}': {e}", err=True)
+        return False
+    return True
 
 
 def _make_view_sql(name: str, path: str, format: str) -> str:
@@ -71,7 +82,8 @@ def register_glue_tables(
         view_name = f"{db}__{name}" if len(name_dbs[name]) > 1 else name
         if view_name in already_registered:
             continue
-        conn.execute(_make_view_sql(view_name, loc, fmt))
+        if not _try_register(conn, view_name, loc, fmt):
+            continue
         registered.append(view_name)
 
     return registered

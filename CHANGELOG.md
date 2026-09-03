@@ -17,6 +17,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Quote view names in `CREATE VIEW` — Glue database/table names commonly contain hyphens,
   which DuckDB's unquoted identifier syntax parsed as subtraction, breaking every hyphenated
   Glue table.
+- A single table that fails to register (empty prefix, no matching files, bad permissions)
+  no longer aborts `duckgate tables`/`-q`/the shell — it's skipped with a warning and the
+  rest of the catalog still loads.
 
 ## [0.1.0] - 2026-09-02
 
