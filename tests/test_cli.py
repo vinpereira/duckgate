@@ -42,7 +42,7 @@ def test_cli_help(runner):
 
 
 def test_cli_version_constant():
-    assert duckgate.__version__ == "0.1.0"
+    assert duckgate.__version__ == "0.2.0"
 
 
 def test_tables_command_no_config(runner, tmp_path, monkeypatch):
