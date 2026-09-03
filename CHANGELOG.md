@@ -27,6 +27,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - A single table that fails to register (empty prefix, no matching files, bad permissions)
   no longer aborts `duckgate tables`/`-q`/the shell — it's skipped with a warning and the
   rest of the catalog still loads.
+- Ctrl+C in the interactive shell now cancels the running query — `prompt_toolkit`'s terminal
+  handling was leaving Ctrl+C unable to reach DuckDB's own cancellation, so a long `SELECT`
+  couldn't be interrupted. Wires up `conn.interrupt()` explicitly for the duration of query
+  execution. Not verified against a real terminal — please confirm.
 
 ## [0.1.0] - 2026-09-02
 
