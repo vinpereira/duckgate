@@ -165,6 +165,32 @@ def test_register_local_tables_skips_table_with_no_matching_files(
     assert "empty_table" in capsys.readouterr().err
 
 
+def test_register_local_tables_logs_progress(duck_conn, sample_parquet_bytes, moto_server, capsys):
+    s3 = boto3.client(
+        "s3",
+        region_name="eu-central-1",
+        endpoint_url=f"http://{moto_server}",
+        aws_access_key_id="test",
+        aws_secret_access_key="test",
+    )
+    s3.create_bucket(
+        Bucket="progress-bucket",
+        CreateBucketConfiguration={"LocationConstraint": "eu-central-1"},
+    )
+    s3.put_object(Bucket="progress-bucket", Key="data/file.parquet", Body=sample_parquet_bytes)
+    _configure_duck_s3(duck_conn, moto_server)
+
+    tables = [
+        TableConfig(name="table_one", path="s3://progress-bucket/data/*.parquet"),
+        TableConfig(name="table_two", path="s3://progress-bucket/data/*.parquet"),
+    ]
+    register_local_tables(duck_conn, tables)
+
+    err = capsys.readouterr().err
+    assert "[1/2] table_one" in err
+    assert "[2/2] table_two" in err
+
+
 def _glue_table_input(name, location, input_format=""):
     return {
         "Name": name,
@@ -229,6 +255,39 @@ def test_register_glue_tables_parquet(duck_conn, moto_server, sample_parquet_byt
     assert "locations" in registered
     count = duck_conn.execute("SELECT COUNT(*) FROM locations").fetchone()[0]
     assert count == 3
+
+
+@mock_aws
+def test_register_glue_tables_logs_progress(duck_conn, moto_server, sample_parquet_bytes, capsys):
+    glue = boto3.client("glue", region_name="eu-central-1")
+    glue.create_database(DatabaseInput={"Name": "my_db"})
+    glue.create_table(
+        DatabaseName="my_db",
+        TableInput=_glue_table_input("locations", "s3://progress-bucket2/locations/"),
+    )
+
+    s3 = boto3.client(
+        "s3",
+        region_name="eu-central-1",
+        endpoint_url=f"http://{moto_server}",
+        aws_access_key_id="test",
+        aws_secret_access_key="test",
+    )
+    s3.create_bucket(
+        Bucket="progress-bucket2", CreateBucketConfiguration={"LocationConstraint": "eu-central-1"}
+    )
+    s3.put_object(
+        Bucket="progress-bucket2", Key="locations/part-0.parquet", Body=sample_parquet_bytes
+    )
+    _configure_duck_s3(duck_conn, moto_server)
+
+    config = Config(
+        aws=AwsConfig(profile="test", region="eu-central-1"),
+        glue=GlueConfig(enabled=True, databases=["my_db"]),
+    )
+    _register_glue(duck_conn, config, already_registered=[])
+
+    assert "[1/1] locations" in capsys.readouterr().err
 
 
 @mock_aws

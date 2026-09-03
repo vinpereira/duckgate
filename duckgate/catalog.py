@@ -10,7 +10,9 @@ def register_local_tables(
     tables: list[TableConfig],
 ) -> list[str]:
     registered: list[str] = []
-    for table in tables:
+    total = len(tables)
+    for i, table in enumerate(tables, start=1):
+        click.echo(f"Registering [{i}/{total}] {table.name}...", err=True)
         if not _try_register(conn, table.name, table.path, table.format):
             continue
         registered.append(table.name)
@@ -76,12 +78,14 @@ def register_glue_tables(
                 name_dbs.setdefault(t["Name"], []).append(db)
 
     registered = []
-    for db, name, loc, fmt in rows:
+    total = len(rows)
+    for i, (db, name, loc, fmt) in enumerate(rows, start=1):
         if not loc:
             continue
         view_name = f"{db}__{name}" if len(name_dbs[name]) > 1 else name
         if view_name in already_registered:
             continue
+        click.echo(f"Registering [{i}/{total}] {view_name}...", err=True)
         if not _try_register(conn, view_name, loc, fmt):
             continue
         registered.append(view_name)
