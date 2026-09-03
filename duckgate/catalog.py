@@ -12,18 +12,24 @@ def register_local_tables(
     registered: list[str] = []
     total = len(tables)
     for i, table in enumerate(tables, start=1):
-        click.echo(f"Registering [{i}/{total}] {table.name}...", err=True)
+        _report_progress(i, total)
         if not _try_register(conn, table.name, table.path, table.format):
             continue
         registered.append(table.name)
+    if total:
+        click.echo(err=True)
     return registered
+
+
+def _report_progress(i: int, total: int) -> None:
+    click.echo(f"\rRegistering tables... {i}/{total}", nl=False, err=True)
 
 
 def _try_register(conn: duckdb.DuckDBPyConnection, name: str, path: str, fmt: str) -> bool:
     try:
         conn.execute(_make_view_sql(name, path, fmt))
     except duckdb.Error as e:
-        click.echo(f"Warning: skipping table '{name}': {e}", err=True)
+        click.echo(f"\nWarning: skipping table '{name}': {e}", err=True)
         return False
     return True
 
@@ -80,16 +86,18 @@ def register_glue_tables(
     registered = []
     total = len(rows)
     for i, (db, name, loc, fmt) in enumerate(rows, start=1):
+        _report_progress(i, total)
         if not loc:
             continue
         view_name = f"{db}__{name}" if len(name_dbs[name]) > 1 else name
         if view_name in already_registered:
             continue
-        click.echo(f"Registering [{i}/{total}] {view_name}...", err=True)
         if not _try_register(conn, view_name, loc, fmt):
             continue
         registered.append(view_name)
 
+    if total:
+        click.echo(err=True)
     return registered
 
 

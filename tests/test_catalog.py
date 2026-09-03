@@ -187,8 +187,8 @@ def test_register_local_tables_logs_progress(duck_conn, sample_parquet_bytes, mo
     register_local_tables(duck_conn, tables)
 
     err = capsys.readouterr().err
-    assert "[1/2] table_one" in err
-    assert "[2/2] table_two" in err
+    assert "Registering tables... 1/2" in err
+    assert "Registering tables... 2/2" in err
 
 
 def _glue_table_input(name, location, input_format=""):
@@ -287,7 +287,7 @@ def test_register_glue_tables_logs_progress(duck_conn, moto_server, sample_parqu
     )
     _register_glue(duck_conn, config, already_registered=[])
 
-    assert "[1/1] locations" in capsys.readouterr().err
+    assert "Registering tables... 1/1" in capsys.readouterr().err
 
 
 @mock_aws

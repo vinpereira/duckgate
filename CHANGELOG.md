@@ -11,9 +11,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `duckgate init` now prompts for the config path (default `~/.duckgate/config.toml`,
   Enter accepts it) instead of always writing `./duckgate.toml`. Pass `-p`/`--path` to skip
   the prompt for scripts and CI.
-- Table registration now logs progress (`Registering [i/N] name...`) to stderr — with many
-  Glue tables, each one binds its schema over the network, which can take a while with no
-  feedback otherwise.
+- Table registration now shows a single self-updating progress line (`Registering tables...
+  i/N`) on stderr — with many Glue tables, each one binds its schema over the network, which
+  can take a while with no feedback otherwise. Kept to one line so it doesn't duplicate the
+  table list `duckgate tables` already prints at the end.
 
 ### Fixed
 
