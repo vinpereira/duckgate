@@ -17,6 +17,7 @@ pipx install duckgate
 ```bash
 duckgate init          # prompts for a config path (default: ~/.duckgate/config.toml)
 duckgate tables        # list available tables
+duckgate describe my_table                   # show a table's schema, no registration
 duckgate               # open interactive shell
 duckgate -q "SELECT COUNT(*) FROM my_table"  # one-shot query
 ```
@@ -52,11 +53,26 @@ format = "parquet"  # parquet | iceberg | csv
   to a specific environment prefix.
 - If two Glue tables from different databases share a name, they are registered as
   `database__table_name`.
+- `duckgate tables` lists what the catalog *discovers* (what Glue/your config advertises),
+  not just tables that are actually queryable. A table with no matching files or bad
+  permissions will still show up in the list and only fails when you query it.
+- Tables are registered lazily: a table's DuckDB view is created only the first time a query
+  references it in a session (`-q` runs once per process; the shell keeps this per session,
+  so a repeated reference to the same table costs nothing).
+
+### Query safety
+
+`-q` and the shell print a warning to stderr when a query has no `LIMIT` clause. This only
+flags the risk — it doesn't rewrite the query, and it can't help an aggregate
+(`COUNT(*)`, `GROUP BY`) that has to scan the whole table regardless of any `LIMIT`.
 
 ## AWS credentials
 
-Uses the AWS profile from `[aws] profile`. Works with SSO (`aws sso login`, Granted `assume`)
-and static credentials alike.
+Uses the AWS profile from `[aws] profile`, resolved via `boto3.Session(profile_name=...)`.
+Works with `aws sso login` and static credentials directly. Tools that only export temporary
+credentials into your shell's environment (e.g. Granted `assume`) are **not** picked up,
+since a named profile lookup ignores ambient environment variables — configure the profile's
+`credential_process` if you want a tool like that to work transparently.
 
 ## Supported formats
 
@@ -69,10 +85,11 @@ and static credentials alike.
 ## Development
 
 ```bash
-uv sync
-uv run pytest
-uv run ruff check --fix .
-uv run ruff format .
+make sync    # uv sync
+make test    # run the test suite
+make lint    # ruff check --fix
+make format  # ruff format
+make check   # lint + format + test + clean (run before every commit)
 ```
 
 ## Release
