@@ -47,6 +47,20 @@ def _discover_glue(config: Config, catalog: dict[str, TableSpec]) -> None:
         catalog[view_name] = TableSpec(path=loc, format=fmt)
 
 
+def ensure_registered(
+    conn: duckdb.DuckDBPyConnection,
+    catalog: dict[str, TableSpec],
+    sql: str,
+    registered: set[str],
+) -> None:
+    for name, spec in catalog.items():
+        if name in registered:
+            continue
+        if name in sql or f'"{name}"' in sql:
+            _try_register(conn, name, spec.path, spec.format)
+            registered.add(name)
+
+
 def register_local_tables(
     conn: duckdb.DuckDBPyConnection,
     tables: list[TableConfig],

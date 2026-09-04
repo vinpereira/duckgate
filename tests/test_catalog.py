@@ -8,6 +8,7 @@ from duckgate.catalog import (
     _detect_format,
     _make_view_sql,
     discover_catalog,
+    ensure_registered,
     register_glue_tables,
     register_local_tables,
 )
@@ -171,6 +172,117 @@ def test_discover_catalog_glue_disabled_skips_glue_entirely():
         catalog = discover_catalog(config)
     mock_session.assert_not_called()
     assert catalog == {}
+
+
+def test_ensure_registered_registers_matching_bare_name(
+    duck_conn, sample_parquet_bytes, moto_server
+):
+    s3 = boto3.client(
+        "s3",
+        region_name="eu-central-1",
+        endpoint_url=f"http://{moto_server}",
+        aws_access_key_id="test",
+        aws_secret_access_key="test",
+    )
+    s3.create_bucket(
+        Bucket="ensure-bucket", CreateBucketConfiguration={"LocationConstraint": "eu-central-1"}
+    )
+    s3.put_object(Bucket="ensure-bucket", Key="data/file.parquet", Body=sample_parquet_bytes)
+    _configure_duck_s3(duck_conn, moto_server)
+
+    catalog = {"my_table": TableSpec(path="s3://ensure-bucket/data/*.parquet", format="parquet")}
+    registered = set()
+    ensure_registered(duck_conn, catalog, "SELECT * FROM my_table", registered)
+
+    assert registered == {"my_table"}
+    count = duck_conn.execute("SELECT COUNT(*) FROM my_table").fetchone()[0]
+    assert count == 3
+
+
+def test_ensure_registered_skips_unrelated_tables(duck_conn, sample_parquet_bytes, moto_server):
+    s3 = boto3.client(
+        "s3",
+        region_name="eu-central-1",
+        endpoint_url=f"http://{moto_server}",
+        aws_access_key_id="test",
+        aws_secret_access_key="test",
+    )
+    s3.create_bucket(
+        Bucket="ensure-bucket2", CreateBucketConfiguration={"LocationConstraint": "eu-central-1"}
+    )
+    s3.put_object(Bucket="ensure-bucket2", Key="data/file.parquet", Body=sample_parquet_bytes)
+    _configure_duck_s3(duck_conn, moto_server)
+
+    catalog = {
+        "wanted": TableSpec(path="s3://ensure-bucket2/data/*.parquet", format="parquet"),
+        "not_wanted": TableSpec(path="s3://does-not-exist/nothing/*.parquet", format="parquet"),
+    }
+    registered = set()
+    ensure_registered(duck_conn, catalog, "SELECT * FROM wanted", registered)
+
+    assert registered == {"wanted"}
+    rows = duck_conn.execute(
+        "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
+    ).fetchall()
+    assert [r[0] for r in rows] == ["wanted"]
+
+
+def test_ensure_registered_matches_quoted_hyphenated_name(
+    duck_conn, sample_parquet_bytes, moto_server
+):
+    s3 = boto3.client(
+        "s3",
+        region_name="eu-central-1",
+        endpoint_url=f"http://{moto_server}",
+        aws_access_key_id="test",
+        aws_secret_access_key="test",
+    )
+    s3.create_bucket(
+        Bucket="ensure-bucket3", CreateBucketConfiguration={"LocationConstraint": "eu-central-1"}
+    )
+    s3.put_object(Bucket="ensure-bucket3", Key="data/file.parquet", Body=sample_parquet_bytes)
+    _configure_duck_s3(duck_conn, moto_server)
+
+    catalog = {
+        "db-a__my-table": TableSpec(path="s3://ensure-bucket3/data/*.parquet", format="parquet")
+    }
+    registered = set()
+    ensure_registered(duck_conn, catalog, 'SELECT * FROM "db-a__my-table"', registered)
+
+    assert registered == {"db-a__my-table"}
+
+
+def test_ensure_registered_skips_already_registered(duck_conn, capsys):
+    catalog = {"broken": TableSpec(path="s3://does-not-exist/nothing/*.parquet", format="parquet")}
+    registered = {"broken"}
+    ensure_registered(duck_conn, catalog, "SELECT * FROM broken", registered)
+    assert registered == {"broken"}
+    # a real attempt against the bogus path would print a warning (see the next
+    # test) — asserting there's none proves no attempt was made
+    assert capsys.readouterr().err == ""
+
+
+def test_ensure_registered_marks_failed_table_as_registered(duck_conn, moto_server, capsys):
+    s3 = boto3.client(
+        "s3",
+        region_name="eu-central-1",
+        endpoint_url=f"http://{moto_server}",
+        aws_access_key_id="test",
+        aws_secret_access_key="test",
+    )
+    s3.create_bucket(
+        Bucket="ensure-bucket4", CreateBucketConfiguration={"LocationConstraint": "eu-central-1"}
+    )
+    _configure_duck_s3(duck_conn, moto_server)
+
+    catalog = {
+        "broken": TableSpec(path="s3://ensure-bucket4/nothing-here/*.parquet", format="parquet")
+    }
+    registered = set()
+    ensure_registered(duck_conn, catalog, "SELECT * FROM broken", registered)
+
+    assert registered == {"broken"}
+    assert "broken" in capsys.readouterr().err
 
 
 def test_register_local_tables_returns_names(duck_conn, sample_parquet_bytes, moto_server):
