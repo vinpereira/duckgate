@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-04
+
 ### Added
 
 - `duckgate describe <table>` — shows a table's schema (column names/types) without
@@ -13,6 +15,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Warn on stderr when a query has no `LIMIT` clause. Note this only flags the risk — it
   doesn't rewrite the query, and it can't help an aggregate query (`COUNT(*)`, `GROUP BY`)
   that has to scan the whole table regardless of any `LIMIT`.
+- `Makefile` with `lint`/`format`/`test`/`check`/`clean`/`sync` targets for local development.
 
 ### Changed
 
