@@ -1,6 +1,8 @@
 from unittest.mock import patch
 
 import boto3
+import duckdb
+import pytest
 from moto import mock_aws
 
 from duckgate.catalog import (
@@ -11,6 +13,7 @@ from duckgate.catalog import (
     ensure_registered,
     register_glue_tables,
     register_local_tables,
+    run_query,
 )
 from duckgate.config import AwsConfig, Config, GlueConfig, TableConfig
 
@@ -283,6 +286,61 @@ def test_ensure_registered_marks_failed_table_as_registered(duck_conn, moto_serv
 
     assert registered == {"broken"}
     assert "broken" in capsys.readouterr().err
+
+
+def test_run_query_registers_and_executes(duck_conn, sample_parquet_bytes, moto_server):
+    s3 = boto3.client(
+        "s3",
+        region_name="eu-central-1",
+        endpoint_url=f"http://{moto_server}",
+        aws_access_key_id="test",
+        aws_secret_access_key="test",
+    )
+    s3.create_bucket(
+        Bucket="run-query-bucket",
+        CreateBucketConfiguration={"LocationConstraint": "eu-central-1"},
+    )
+    s3.put_object(Bucket="run-query-bucket", Key="data/file.parquet", Body=sample_parquet_bytes)
+    _configure_duck_s3(duck_conn, moto_server)
+
+    catalog = {"my_table": TableSpec(path="s3://run-query-bucket/data/*.parquet", format="parquet")}
+    registered = set()
+    result = run_query(duck_conn, catalog, "SELECT COUNT(*) FROM my_table", registered)
+
+    assert result.fetchone()[0] == 3
+    assert registered == {"my_table"}
+
+
+def test_run_query_falls_back_on_catalog_exception(duck_conn, sample_parquet_bytes, moto_server):
+    s3 = boto3.client(
+        "s3",
+        region_name="eu-central-1",
+        endpoint_url=f"http://{moto_server}",
+        aws_access_key_id="test",
+        aws_secret_access_key="test",
+    )
+    s3.create_bucket(
+        Bucket="fallback-bucket",
+        CreateBucketConfiguration={"LocationConstraint": "eu-central-1"},
+    )
+    s3.put_object(Bucket="fallback-bucket", Key="data/file.parquet", Body=sample_parquet_bytes)
+    _configure_duck_s3(duck_conn, moto_server)
+
+    catalog = {"my_table": TableSpec(path="s3://fallback-bucket/data/*.parquet", format="parquet")}
+    registered = set()
+
+    # simulate the text scan missing the table entirely — the real safety net
+    # is DuckDB's own "table does not exist" error, handled inside run_query
+    with patch("duckgate.catalog.ensure_registered"):
+        result = run_query(duck_conn, catalog, "SELECT COUNT(*) FROM my_table", registered)
+
+    assert result.fetchone()[0] == 3
+    assert registered == {"my_table"}
+
+
+def test_run_query_reraises_for_genuinely_unknown_table(duck_conn):
+    with pytest.raises(duckdb.CatalogException):
+        run_query(duck_conn, {}, "SELECT * FROM totally_unknown_table", set())
 
 
 def test_register_local_tables_returns_names(duck_conn, sample_parquet_bytes, moto_server):

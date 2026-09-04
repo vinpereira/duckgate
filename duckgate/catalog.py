@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass
 
 import boto3
@@ -59,6 +60,27 @@ def ensure_registered(
         if name in sql or f'"{name}"' in sql:
             _try_register(conn, name, spec.path, spec.format)
             registered.add(name)
+
+
+def run_query(
+    conn: duckdb.DuckDBPyConnection,
+    catalog: dict[str, TableSpec],
+    sql: str,
+    registered: set[str],
+) -> duckdb.DuckDBPyRelation:
+    ensure_registered(conn, catalog, sql, registered)
+    for _ in range(len(catalog) + 1):
+        try:
+            return conn.execute(sql)
+        except duckdb.CatalogException as e:
+            match = re.search(r"Table with name (\S+) does not exist", str(e))
+            missing = match.group(1) if match else None
+            if missing is None or missing not in catalog or missing in registered:
+                raise
+            spec = catalog[missing]
+            _try_register(conn, missing, spec.path, spec.format)
+            registered.add(missing)
+    raise RuntimeError("could not resolve all tables referenced by the query")
 
 
 def register_local_tables(
