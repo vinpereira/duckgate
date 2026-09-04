@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-04
+
+### Fixed
+
+- `ensure_registered`'s query-text scan used a plain substring check, which false-positived
+  on tables whose name is a literal prefix of another (common with Glue's hierarchical
+  naming, e.g. `..._root_table` vs. `..._root_table_accumulateddata_batterystatus`) —
+  querying only the longer table also registered the shorter one unnecessarily. Now uses a
+  word-boundary-aware match.
+
+### Docs
+
+- README: document `duckgate describe`, lazy registration, the LIMIT warning, and the
+  Makefile targets. Correct the AWS credentials section — Granted `assume` alone does **not**
+  work transparently (it only exports temporary credentials into the shell's environment,
+  which a named-profile lookup ignores); it needs `credential_process` configured on the
+  profile.
+
 ## [0.3.0] - 2026-09-04
 
 ### Added
