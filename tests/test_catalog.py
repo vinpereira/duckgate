@@ -341,6 +341,52 @@ def test_run_query_reraises_for_genuinely_unknown_table(duck_conn):
         run_query(duck_conn, {}, "SELECT * FROM totally_unknown_table", set())
 
 
+def test_run_query_warns_when_no_limit(duck_conn, sample_parquet_bytes, moto_server, capsys):
+    s3 = boto3.client(
+        "s3",
+        region_name="eu-central-1",
+        endpoint_url=f"http://{moto_server}",
+        aws_access_key_id="test",
+        aws_secret_access_key="test",
+    )
+    s3.create_bucket(
+        Bucket="limit-warn-bucket",
+        CreateBucketConfiguration={"LocationConstraint": "eu-central-1"},
+    )
+    s3.put_object(Bucket="limit-warn-bucket", Key="data/file.parquet", Body=sample_parquet_bytes)
+    _configure_duck_s3(duck_conn, moto_server)
+
+    catalog = {
+        "my_table": TableSpec(path="s3://limit-warn-bucket/data/*.parquet", format="parquet")
+    }
+    run_query(duck_conn, catalog, "SELECT * FROM my_table", set())
+
+    assert "LIMIT" in capsys.readouterr().err
+
+
+def test_run_query_no_warning_when_limit_present(
+    duck_conn, sample_parquet_bytes, moto_server, capsys
+):
+    s3 = boto3.client(
+        "s3",
+        region_name="eu-central-1",
+        endpoint_url=f"http://{moto_server}",
+        aws_access_key_id="test",
+        aws_secret_access_key="test",
+    )
+    s3.create_bucket(
+        Bucket="limit-ok-bucket",
+        CreateBucketConfiguration={"LocationConstraint": "eu-central-1"},
+    )
+    s3.put_object(Bucket="limit-ok-bucket", Key="data/file.parquet", Body=sample_parquet_bytes)
+    _configure_duck_s3(duck_conn, moto_server)
+
+    catalog = {"my_table": TableSpec(path="s3://limit-ok-bucket/data/*.parquet", format="parquet")}
+    run_query(duck_conn, catalog, "SELECT * FROM my_table LIMIT 5", set())
+
+    assert capsys.readouterr().err == ""
+
+
 def _glue_table_input(name, location, input_format=""):
     return {
         "Name": name,

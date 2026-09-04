@@ -69,6 +69,11 @@ def run_query(
     registered: set[str],
 ) -> duckdb.DuckDBPyRelation:
     ensure_registered(conn, catalog, sql, registered)
+    if not re.search(r"\blimit\b", sql, re.IGNORECASE):
+        click.echo(
+            "Warning: no LIMIT — this query may scan a lot of data.",
+            err=True,
+        )
     for _ in range(len(catalog) + 1):
         try:
             return conn.execute(sql)
