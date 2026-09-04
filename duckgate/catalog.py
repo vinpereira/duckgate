@@ -1,8 +1,50 @@
+from dataclasses import dataclass
+
 import boto3
 import click
 import duckdb
 
 from duckgate.config import Config, TableConfig
+
+
+@dataclass
+class TableSpec:
+    path: str
+    format: str
+
+
+def discover_catalog(config: Config) -> dict[str, TableSpec]:
+    catalog: dict[str, TableSpec] = {}
+    for table in config.tables:
+        catalog[table.name] = TableSpec(path=table.path, format=table.format)
+    if config.glue.enabled:
+        _discover_glue(config, catalog)
+    return catalog
+
+
+def _discover_glue(config: Config, catalog: dict[str, TableSpec]) -> None:
+    session = boto3.Session(profile_name=config.aws.profile)
+    glue = session.client("glue", region_name=config.aws.region)
+
+    dbs = _list_databases(glue, config.glue.databases)
+    rows = []  # (db, name, location, fmt)
+    name_dbs: dict[str, list[str]] = {}
+
+    for db in dbs:
+        pager = glue.get_paginator("get_tables")
+        for page in pager.paginate(DatabaseName=db):
+            for t in page["TableList"]:
+                loc = t.get("StorageDescriptor", {}).get("Location", "")
+                rows.append((db, t["Name"], loc, _detect_format(t)))
+                name_dbs.setdefault(t["Name"], []).append(db)
+
+    for db, name, loc, fmt in rows:
+        if not loc:
+            continue
+        view_name = f"{db}__{name}" if len(name_dbs[name]) > 1 else name
+        if view_name in catalog:
+            continue
+        catalog[view_name] = TableSpec(path=loc, format=fmt)
 
 
 def register_local_tables(

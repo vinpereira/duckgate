@@ -4,8 +4,10 @@ import boto3
 from moto import mock_aws
 
 from duckgate.catalog import (
+    TableSpec,
     _detect_format,
     _make_view_sql,
+    discover_catalog,
     register_glue_tables,
     register_local_tables,
 )
@@ -76,6 +78,99 @@ def test_detect_format_csv_explicit():
         "StorageDescriptor": {"InputFormat": "org.apache.hadoop.mapred.CsvInputFormat"},
     }
     assert _detect_format(table) == "csv"
+
+
+def test_discover_catalog_local_tables_only():
+    config = Config(
+        aws=AwsConfig(profile="test", region="eu-central-1"),
+        glue=GlueConfig(enabled=False),
+        tables=[TableConfig(name="my_table", path="s3://bucket/data/*.parquet", format="parquet")],
+    )
+    catalog = discover_catalog(config)
+    assert catalog == {"my_table": TableSpec(path="s3://bucket/data/*.parquet", format="parquet")}
+
+
+@mock_aws
+def test_discover_catalog_glue_tables():
+    glue = boto3.client("glue", region_name="eu-central-1")
+    glue.create_database(DatabaseInput={"Name": "my_db"})
+    glue.create_table(
+        DatabaseName="my_db",
+        TableInput=_glue_table_input("locations", "s3://bucket/locations/"),
+    )
+    config = Config(
+        aws=AwsConfig(profile="test", region="eu-central-1"),
+        glue=GlueConfig(enabled=True, databases=["my_db"]),
+    )
+    with patch("duckgate.catalog.boto3.Session", return_value=boto3.Session()):
+        catalog = discover_catalog(config)
+    assert catalog == {"locations": TableSpec(path="s3://bucket/locations/", format="parquet")}
+
+
+@mock_aws
+def test_discover_catalog_local_overrides_glue():
+    glue = boto3.client("glue", region_name="eu-central-1")
+    glue.create_database(DatabaseInput={"Name": "my_db"})
+    glue.create_table(
+        DatabaseName="my_db",
+        TableInput=_glue_table_input("locations", "s3://bucket/locations/"),
+    )
+    config = Config(
+        aws=AwsConfig(profile="test", region="eu-central-1"),
+        glue=GlueConfig(enabled=True, databases=["my_db"]),
+        tables=[TableConfig(name="locations", path="s3://override/data/*.parquet", format="csv")],
+    )
+    with patch("duckgate.catalog.boto3.Session", return_value=boto3.Session()):
+        catalog = discover_catalog(config)
+    assert catalog["locations"] == TableSpec(path="s3://override/data/*.parquet", format="csv")
+
+
+@mock_aws
+def test_discover_catalog_collision_uses_double_underscore():
+    config = Config(
+        aws=AwsConfig(profile="test", region="eu-central-1"),
+        glue=GlueConfig(enabled=True, databases=["db_a", "db_b"]),
+    )
+    glue = boto3.client("glue", region_name="eu-central-1")
+    for db in ["db_a", "db_b"]:
+        glue.create_database(DatabaseInput={"Name": db})
+        glue.create_table(
+            DatabaseName=db,
+            TableInput=_glue_table_input("events", f"s3://bucket/{db}/events/"),
+        )
+    with patch("duckgate.catalog.boto3.Session", return_value=boto3.Session()):
+        catalog = discover_catalog(config)
+    assert "db_a__events" in catalog
+    assert "db_b__events" in catalog
+    assert "events" not in catalog
+
+
+@mock_aws
+def test_discover_catalog_skips_table_without_location():
+    glue = boto3.client("glue", region_name="eu-central-1")
+    glue.create_database(DatabaseInput={"Name": "my_db"})
+    glue.create_table(
+        DatabaseName="my_db",
+        TableInput=_glue_table_input("empty_table", ""),
+    )
+    config = Config(
+        aws=AwsConfig(profile="test", region="eu-central-1"),
+        glue=GlueConfig(enabled=True, databases=["my_db"]),
+    )
+    with patch("duckgate.catalog.boto3.Session", return_value=boto3.Session()):
+        catalog = discover_catalog(config)
+    assert "empty_table" not in catalog
+
+
+def test_discover_catalog_glue_disabled_skips_glue_entirely():
+    config = Config(
+        aws=AwsConfig(profile="test", region="eu-central-1"),
+        glue=GlueConfig(enabled=False, databases=["my_db"]),
+    )
+    with patch("duckgate.catalog.boto3.Session") as mock_session:
+        catalog = discover_catalog(config)
+    mock_session.assert_not_called()
+    assert catalog == {}
 
 
 def test_register_local_tables_returns_names(duck_conn, sample_parquet_bytes, moto_server):
