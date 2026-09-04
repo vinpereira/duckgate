@@ -254,6 +254,35 @@ def test_ensure_registered_matches_quoted_hyphenated_name(
     assert registered == {"db-a__my-table"}
 
 
+def test_ensure_registered_does_not_match_name_that_is_a_prefix_of_another(
+    duck_conn, sample_parquet_bytes, moto_server
+):
+    # real-world case: Glue tables are often named hierarchically, e.g.
+    # "..._root_table" and "..._root_table_accumulateddata_batterystatus" — a
+    # plain substring scan would wrongly also register the shorter one
+    s3 = boto3.client(
+        "s3",
+        region_name="eu-central-1",
+        endpoint_url=f"http://{moto_server}",
+        aws_access_key_id="test",
+        aws_secret_access_key="test",
+    )
+    s3.create_bucket(
+        Bucket="prefix-bucket", CreateBucketConfiguration={"LocationConstraint": "eu-central-1"}
+    )
+    s3.put_object(Bucket="prefix-bucket", Key="data/file.parquet", Body=sample_parquet_bytes)
+    _configure_duck_s3(duck_conn, moto_server)
+
+    catalog = {
+        "root_table": TableSpec(path="s3://does-not-exist/nothing/*.parquet", format="parquet"),
+        "root_table_child": TableSpec(path="s3://prefix-bucket/data/*.parquet", format="parquet"),
+    }
+    registered = set()
+    ensure_registered(duck_conn, catalog, "SELECT * FROM root_table_child", registered)
+
+    assert registered == {"root_table_child"}
+
+
 def test_ensure_registered_skips_already_registered(duck_conn, capsys):
     catalog = {"broken": TableSpec(path="s3://does-not-exist/nothing/*.parquet", format="parquet")}
     registered = {"broken"}

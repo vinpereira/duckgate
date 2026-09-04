@@ -57,7 +57,7 @@ def ensure_registered(
     for name, spec in catalog.items():
         if name in registered:
             continue
-        if name in sql or f'"{name}"' in sql:
+        if re.search(rf"\b{re.escape(name)}\b", sql):
             _try_register(conn, name, spec.path, spec.format)
             registered.add(name)
 
