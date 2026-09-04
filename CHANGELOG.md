@@ -8,9 +8,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- `duckgate describe <table>` — shows a table's schema (column names/types) without
+  registering a view for it.
 - Warn on stderr when a query has no `LIMIT` clause. Note this only flags the risk — it
   doesn't rewrite the query, and it can't help an aggregate query (`COUNT(*)`, `GROUP BY`)
   that has to scan the whole table regardless of any `LIMIT`.
+
+### Changed
+
+- Table registration is now lazy: a table's DuckDB view is created only when a query
+  references it, once per session (repeated references cost nothing). Previously every
+  invocation — including `duckgate tables` — eagerly registered every table in scope, which
+  meant a real S3 round-trip per table before anything could run.
+- `duckgate tables` no longer opens a DuckDB connection or touches S3 — it lists the Glue/
+  local catalog directly, so it's near-instant regardless of how many tables exist.
+
+### Behavior change
+
+- `duckgate tables` now lists every table the catalog *discovers* (what Glue/your local
+  config advertises), not just the ones that previously *registered successfully*. A table
+  with no matching files or bad permissions now appears in the list and only fails when you
+  actually query it (with the existing warning), instead of being silently excluded upfront.
 
 ## [0.2.0] - 2026-09-03
 
