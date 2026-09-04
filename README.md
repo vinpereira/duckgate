@@ -2,6 +2,27 @@
 
 Interactive SQL shell over S3 data (Parquet, Iceberg, CSV) using DuckDB.
 
+## What duckgate adds on top of DuckDB
+
+The SQL engine is unmodified DuckDB — every query, join, and function runs exactly as it
+would in the `duckdb` CLI. `duckgate` is a thin orchestration layer that solves a narrower
+problem: querying an AWS Glue Data Catalog full of S3 tables without hand-writing paths.
+
+| | Plain DuckDB | duckgate |
+|---|---|---|
+| Discover tables | Write `read_parquet('s3://...')` per path, by hand | `duckgate tables` lists everything from Glue + local config |
+| AWS credentials | `SET s3_access_key_id=...` or `CREATE SECRET`, manually | Resolved automatically from an AWS profile (SSO or static) |
+| Hyphenated names | You quote the identifier yourself | Quoted automatically (`CREATE VIEW "name-with-hyphens"`) |
+| Glue location with no wildcard | `read_parquet` won't expand it — "no files found" | `**/*.<format>` appended automatically |
+| Point at another environment | Rewrite the query with a different path | `[[tables]]` overrides a Glue table by name, no catalog edits |
+| Registering many tables | N/A — you only use what you write | Lazy, on-demand, once per session |
+| One broken table (bad perms, empty) | You just don't query what you don't know about | Rest of the catalog keeps working, warning printed |
+| Query with no `LIMIT` | No warning | Warned on stderr (`-q` and the shell) |
+
+Where plain DuckDB already holds its own: the `duckdb` CLI has its own polished interactive
+shell (history, autocomplete, `.mode`) and a `-c "query"` one-shot flag. `duckgate`'s shell is
+simpler — its value is coming with the Glue catalog already wired in, not out-shelling DuckDB.
+
 ## Install
 
 `duckgate` is a CLI tool, so an isolated install is recommended over a bare `pip install`:
