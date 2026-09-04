@@ -65,6 +65,13 @@ def test_tables_command_does_not_create_duckdb_connection(runner, config_toml):
     assert result.exit_code == 0
 
 
+def test_describe_command_unknown_table(runner, config_toml):
+    result = runner.invoke(cli, ["describe", "does_not_exist"])
+    assert result.exit_code != 0
+    assert "does_not_exist" in result.output
+    assert "duckgate tables" in result.output
+
+
 def test_init_command_creates_file(runner, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     result = runner.invoke(cli, ["init", "--path", "duckgate.toml"])

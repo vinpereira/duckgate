@@ -97,16 +97,24 @@ def _try_register(conn: duckdb.DuckDBPyConnection, name: str, path: str, fmt: st
     return True
 
 
+def _source_expr(path: str, format: str) -> str:
+    if format == "iceberg":
+        return f"iceberg_scan('{path}')"
+    path = _with_glob(path, format)
+    if format == "csv":
+        return f"read_csv('{path}')"
+    return f"read_parquet('{path}')"
+
+
 def _make_view_sql(name: str, path: str, format: str) -> str:
     # Glue database/table names often contain hyphens, which DuckDB's unquoted
     # identifier syntax parses as the subtraction operator — always quote.
     name = '"' + name.replace('"', '""') + '"'
-    if format == "iceberg":
-        return f"CREATE OR REPLACE VIEW {name} AS SELECT * FROM iceberg_scan('{path}')"
-    path = _with_glob(path, format)
-    if format == "csv":
-        return f"CREATE OR REPLACE VIEW {name} AS SELECT * FROM read_csv('{path}')"
-    return f"CREATE OR REPLACE VIEW {name} AS SELECT * FROM read_parquet('{path}')"
+    return f"CREATE OR REPLACE VIEW {name} AS SELECT * FROM {_source_expr(path, format)}"
+
+
+def describe_table(conn: duckdb.DuckDBPyConnection, spec: TableSpec) -> duckdb.DuckDBPyRelation:
+    return conn.execute(f"DESCRIBE SELECT * FROM {_source_expr(spec.path, spec.format)}")
 
 
 def _with_glob(path: str, format: str) -> str:

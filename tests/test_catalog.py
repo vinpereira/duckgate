@@ -9,6 +9,7 @@ from duckgate.catalog import (
     TableSpec,
     _detect_format,
     _make_view_sql,
+    describe_table,
     discover_catalog,
     ensure_registered,
     run_query,
@@ -385,6 +386,32 @@ def test_run_query_no_warning_when_limit_present(
     run_query(duck_conn, catalog, "SELECT * FROM my_table LIMIT 5", set())
 
     assert capsys.readouterr().err == ""
+
+
+def test_describe_table_shows_columns(duck_conn, sample_parquet_bytes, moto_server):
+    s3 = boto3.client(
+        "s3",
+        region_name="eu-central-1",
+        endpoint_url=f"http://{moto_server}",
+        aws_access_key_id="test",
+        aws_secret_access_key="test",
+    )
+    s3.create_bucket(
+        Bucket="describe-bucket",
+        CreateBucketConfiguration={"LocationConstraint": "eu-central-1"},
+    )
+    s3.put_object(Bucket="describe-bucket", Key="data/file.parquet", Body=sample_parquet_bytes)
+    _configure_duck_s3(duck_conn, moto_server)
+
+    spec = TableSpec(path="s3://describe-bucket/data/*.parquet", format="parquet")
+    df = describe_table(duck_conn, spec).fetchdf()
+
+    assert list(df["column_name"]) == ["id", "name"]
+    # describe_table must not leave a registered view behind
+    rows = duck_conn.execute(
+        "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
+    ).fetchall()
+    assert rows == []
 
 
 def _glue_table_input(name, location, input_format=""):

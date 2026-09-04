@@ -2,7 +2,7 @@ from pathlib import Path
 
 import click
 
-from duckgate.catalog import discover_catalog, run_query
+from duckgate.catalog import describe_table, discover_catalog, run_query
 from duckgate.config import find_config, load_config
 from duckgate.engine import create_connection
 
@@ -65,6 +65,33 @@ def tables():
     catalog = discover_catalog(config)
     for name in sorted(catalog):
         click.echo(name)
+
+
+@cli.command()
+@click.argument("name")
+def describe(name):
+    """Show a table's schema without registering it."""
+    try:
+        config = load_config(find_config())
+    except FileNotFoundError as e:
+        click.echo(str(e), err=True)
+        raise SystemExit(1) from e
+
+    catalog = discover_catalog(config)
+    if name not in catalog:
+        click.echo(
+            f"Table '{name}' not found. Run `duckgate tables` to see what's available.",
+            err=True,
+        )
+        raise SystemExit(1)
+
+    conn = create_connection(config)
+    try:
+        df = describe_table(conn, catalog[name]).fetchdf()
+        click.echo(df.to_string(index=False))
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        raise SystemExit(1) from e
 
 
 @cli.command("init")
