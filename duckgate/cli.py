@@ -2,17 +2,15 @@ from pathlib import Path
 
 import click
 
-from duckgate.catalog import register_glue_tables, register_local_tables
+from duckgate.catalog import discover_catalog, run_query
 from duckgate.config import find_config, load_config
 from duckgate.engine import create_connection
 
 
 def _build_conn(config):
     conn = create_connection(config)
-    reg = register_local_tables(conn, config.tables)
-    if config.glue.enabled:
-        register_glue_tables(conn, config, already_registered=reg)
-    return conn
+    catalog = discover_catalog(config)
+    return conn, catalog
 
 
 @click.group(invoke_without_command=True)
@@ -35,11 +33,11 @@ def cli(ctx, query_str, output_format):
         click.echo(str(e), err=True)
         raise SystemExit(1) from e
 
-    conn = _build_conn(config)
+    conn, catalog = _build_conn(config)
 
     if query_str:
         try:
-            df = conn.execute(query_str).fetchdf()
+            df = run_query(conn, catalog, query_str, set()).fetchdf()
             if output_format == "csv":
                 click.echo(df.to_csv(index=False), nl=False)
             elif output_format == "json":
@@ -52,7 +50,7 @@ def cli(ctx, query_str, output_format):
     else:
         from duckgate.shell import run_shell
 
-        run_shell(conn)
+        run_shell(conn, catalog)
 
 
 @cli.command()
@@ -64,11 +62,8 @@ def tables():
         click.echo(str(e), err=True)
         raise SystemExit(1) from e
 
-    conn = _build_conn(config)
-    rows = conn.execute(
-        "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main' ORDER BY 1"
-    ).fetchall()
-    for (name,) in rows:
+    catalog = discover_catalog(config)
+    for name in sorted(catalog):
         click.echo(name)
 
 

@@ -5,7 +5,7 @@ import boto3
 import click
 import duckdb
 
-from duckgate.config import Config, TableConfig
+from duckgate.config import Config
 
 
 @dataclass
@@ -83,26 +83,6 @@ def run_query(
     raise RuntimeError("could not resolve all tables referenced by the query")
 
 
-def register_local_tables(
-    conn: duckdb.DuckDBPyConnection,
-    tables: list[TableConfig],
-) -> list[str]:
-    registered: list[str] = []
-    total = len(tables)
-    for i, table in enumerate(tables, start=1):
-        _report_progress(i, total)
-        if not _try_register(conn, table.name, table.path, table.format):
-            continue
-        registered.append(table.name)
-    if total:
-        click.echo(err=True)
-    return registered
-
-
-def _report_progress(i: int, total: int) -> None:
-    click.echo(f"\rRegistering tables... {i}/{total}", nl=False, err=True)
-
-
 def _try_register(conn: duckdb.DuckDBPyConnection, name: str, path: str, fmt: str) -> bool:
     try:
         conn.execute(_make_view_sql(name, path, fmt))
@@ -139,44 +119,6 @@ def _detect_format(table: dict) -> str:
     if "csv" in input_format.lower() and "parquet" not in input_format.lower():
         return "csv"
     return "parquet"
-
-
-def register_glue_tables(
-    conn: duckdb.DuckDBPyConnection,
-    config: Config,
-    already_registered: list[str],
-) -> list[str]:
-    session = boto3.Session(profile_name=config.aws.profile)
-    glue = session.client("glue", region_name=config.aws.region)
-
-    dbs = _list_databases(glue, config.glue.databases)
-    rows = []  # (db, name, location, fmt)
-    name_dbs: dict[str, list[str]] = {}  # name -> [db, ...] — used to detect collisions
-
-    for db in dbs:
-        pager = glue.get_paginator("get_tables")
-        for page in pager.paginate(DatabaseName=db):
-            for t in page["TableList"]:
-                loc = t.get("StorageDescriptor", {}).get("Location", "")
-                rows.append((db, t["Name"], loc, _detect_format(t)))
-                name_dbs.setdefault(t["Name"], []).append(db)
-
-    registered = []
-    total = len(rows)
-    for i, (db, name, loc, fmt) in enumerate(rows, start=1):
-        _report_progress(i, total)
-        if not loc:
-            continue
-        view_name = f"{db}__{name}" if len(name_dbs[name]) > 1 else name
-        if view_name in already_registered:
-            continue
-        if not _try_register(conn, view_name, loc, fmt):
-            continue
-        registered.append(view_name)
-
-    if total:
-        click.echo(err=True)
-    return registered
 
 
 def _list_databases(glue, databases):
