@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-05
+
+### Breaking
+
+- Renamed the `[[tables]]` config section to `[[sources]]`, and `TableConfig` to
+  `SourceConfig`. Existing `duckgate.toml` files using `[[tables]]` need updating — the
+  section is no longer recognized. Motivation: `duckgate` isn't Glue-specific — a "source" is
+  just a named piece of S3 data, whether or not it corresponds to a Glue table.
+
+### Added
+
+- Documented querying S3 directly with no config at all (`read_parquet`/`iceberg_scan` with
+  a literal path, in `-q` or the shell) — this already worked, it just wasn't written down.
+  README now leads with this and de-emphasizes Glue as a hard requirement.
+- `duckgate init`'s generated template explains the dual role of `[[sources]]`: overrides a
+  Glue table by name if one matches, otherwise it's just a name for an S3 location.
+
 ## [0.3.1] - 2026-09-04
 
 ### Fixed
