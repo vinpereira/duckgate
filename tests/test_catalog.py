@@ -14,7 +14,7 @@ from duckgate.catalog import (
     ensure_registered,
     run_query,
 )
-from duckgate.config import AwsConfig, Config, GlueConfig, TableConfig
+from duckgate.config import AwsConfig, Config, GlueConfig, SourceConfig
 
 
 def test_make_view_sql_parquet():
@@ -83,11 +83,13 @@ def test_detect_format_csv_explicit():
     assert _detect_format(table) == "csv"
 
 
-def test_discover_catalog_local_tables_only():
+def test_discover_catalog_local_sources_only():
     config = Config(
         aws=AwsConfig(profile="test", region="eu-central-1"),
         glue=GlueConfig(enabled=False),
-        tables=[TableConfig(name="my_table", path="s3://bucket/data/*.parquet", format="parquet")],
+        sources=[
+            SourceConfig(name="my_table", path="s3://bucket/data/*.parquet", format="parquet")
+        ],
     )
     catalog = discover_catalog(config)
     assert catalog == {"my_table": TableSpec(path="s3://bucket/data/*.parquet", format="parquet")}
@@ -121,7 +123,7 @@ def test_discover_catalog_local_overrides_glue():
     config = Config(
         aws=AwsConfig(profile="test", region="eu-central-1"),
         glue=GlueConfig(enabled=True, databases=["my_db"]),
-        tables=[TableConfig(name="locations", path="s3://override/data/*.parquet", format="csv")],
+        sources=[SourceConfig(name="locations", path="s3://override/data/*.parquet", format="csv")],
     )
     with patch("duckgate.catalog.boto3.Session", return_value=boto3.Session()):
         catalog = discover_catalog(config)

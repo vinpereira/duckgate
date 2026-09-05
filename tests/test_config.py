@@ -11,20 +11,20 @@ def test_load_minimal_config(tmp_path):
     assert config.aws.region == "eu-central-1"
     assert config.glue.enabled is True
     assert config.glue.databases == []
-    assert config.tables == []
+    assert config.sources == []
 
 
-def test_load_config_with_local_table(tmp_path):
+def test_load_config_with_local_source(tmp_path):
     toml = tmp_path / "duckgate.toml"
     toml.write_text(
         '[aws]\nprofile = "p"\nregion = "eu-central-1"\n'
-        '[[tables]]\nname = "fis_location"\n'
+        '[[sources]]\nname = "fis_location"\n'
         'path = "s3://bucket/prefix/**/*.parquet"\nformat = "parquet"\n'
     )
     config = load_config(toml)
-    assert len(config.tables) == 1
-    assert config.tables[0].name == "fis_location"
-    assert config.tables[0].format == "parquet"
+    assert len(config.sources) == 1
+    assert config.sources[0].name == "fis_location"
+    assert config.sources[0].format == "parquet"
 
 
 def test_load_config_glue_disabled(tmp_path):

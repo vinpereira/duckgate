@@ -124,7 +124,12 @@ def init_cmd(path_str):
         "enabled   = true\n"
         "databases = []  # empty = all databases\n"
         "\n"
-        "# [[tables]]\n"
+        "# [[sources]] name a piece of S3 data you want to query as `name`.\n"
+        "# - If it matches a Glue table name, it overrides that table (e.g. to\n"
+        "#   point at a different environment) without touching the catalog.\n"
+        "# - Without Glue, a source is just a name for wherever your data lives\n"
+        "#   in S3 — a bucket + prefix, no catalog needed.\n"
+        "# [[sources]]\n"
         '# name   = "my_table"\n'
         '# path   = "s3://my-bucket/prefix/**/*.parquet"\n'
         '# format = "parquet"  # parquet | iceberg | csv\n'

@@ -16,8 +16,8 @@ class TableSpec:
 
 def discover_catalog(config: Config) -> dict[str, TableSpec]:
     catalog: dict[str, TableSpec] = {}
-    for table in config.tables:
-        catalog[table.name] = TableSpec(path=table.path, format=table.format)
+    for source in config.sources:
+        catalog[source.name] = TableSpec(path=source.path, format=source.format)
     if config.glue.enabled:
         _discover_glue(config, catalog)
     return catalog

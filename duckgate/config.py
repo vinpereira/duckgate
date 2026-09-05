@@ -16,7 +16,7 @@ class GlueConfig:
 
 
 @dataclass
-class TableConfig:
+class SourceConfig:
     name: str
     path: str
     format: str = "parquet"
@@ -26,7 +26,7 @@ class TableConfig:
 class Config:
     aws: AwsConfig
     glue: GlueConfig = field(default_factory=GlueConfig)
-    tables: list[TableConfig] = field(default_factory=list)
+    sources: list[SourceConfig] = field(default_factory=list)
 
 
 def find_config() -> Path:
@@ -51,5 +51,5 @@ def load_config(path: Path) -> Config:
         enabled=glue_data.get("enabled", True),
         databases=glue_data.get("databases", []),
     )
-    tables = [TableConfig(**t) for t in data.get("tables", [])]
-    return Config(aws=aws, glue=glue, tables=tables)
+    sources = [SourceConfig(**s) for s in data.get("sources", [])]
+    return Config(aws=aws, glue=glue, sources=sources)
