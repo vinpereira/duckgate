@@ -103,6 +103,8 @@ def _source_expr(path: str, format: str) -> str:
     path = _with_glob(path, format)
     if format == "csv":
         return f"read_csv('{path}')"
+    if format == "json":
+        return f"read_json('{path}')"
     return f"read_parquet('{path}')"
 
 
@@ -117,18 +119,28 @@ def describe_table(conn: duckdb.DuckDBPyConnection, spec: TableSpec) -> duckdb.D
     return conn.execute(f"DESCRIBE SELECT * FROM {_source_expr(spec.path, spec.format)}")
 
 
+_GLOB_EXTENSIONS = {"parquet": "parquet", "csv": "csv", "json": "json*"}
+
+
 def _with_glob(path: str, format: str) -> str:
     # Glue table locations are usually a bare folder prefix (no wildcard) —
-    # read_parquet/read_csv won't expand that on their own, so add one.
+    # read_parquet/read_csv/read_json won't expand that on their own, so add
+    # one. JSON needs "json*" (not "json") to also match gzipped files like
+    # CloudTrail's "*.json.gz".
     if "*" in path:
         return path
-    return f"{path.rstrip('/')}/**/*.{format}"
+    ext = _GLOB_EXTENSIONS.get(format, format)
+    return f"{path.rstrip('/')}/**/*.{ext}"
 
 
 def _detect_format(table: dict) -> str:
     if table.get("TableType") == "ICEBERG":
         return "iceberg"
-    input_format = table.get("StorageDescriptor", {}).get("InputFormat", "")
+    storage = table.get("StorageDescriptor", {})
+    serde_lib = storage.get("SerdeInfo", {}).get("SerializationLibrary", "")
+    if "json" in serde_lib.lower():
+        return "json"
+    input_format = storage.get("InputFormat", "")
     if "csv" in input_format.lower() and "parquet" not in input_format.lower():
         return "csv"
     return "parquet"

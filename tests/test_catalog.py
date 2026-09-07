@@ -9,6 +9,7 @@ from duckgate.catalog import (
     TableSpec,
     _detect_format,
     _make_view_sql,
+    _source_expr,
     describe_table,
     discover_catalog,
     ensure_registered,
@@ -50,6 +51,27 @@ def test_make_view_sql_parquet_adds_glob_to_bare_folder():
 def test_make_view_sql_iceberg_keeps_bare_folder_unchanged():
     sql = _make_view_sql("locations", "s3://bucket/locations/", "iceberg")
     assert "iceberg_scan('s3://bucket/locations/')" in sql
+
+
+def test_source_expr_json_adds_glob_with_gz_wildcard():
+    sql = _source_expr("s3://bucket/logs/", "json")
+    assert "read_json('s3://bucket/logs/**/*.json*')" == sql
+
+
+def test_source_expr_json_leaves_explicit_glob_unchanged():
+    sql = _source_expr("s3://bucket/logs/**/*.json.gz", "json")
+    assert sql == "read_json('s3://bucket/logs/**/*.json.gz')"
+
+
+def test_detect_format_json_from_serde():
+    table = {
+        "TableType": "",
+        "StorageDescriptor": {
+            "InputFormat": "org.apache.hadoop.mapred.TextInputFormat",
+            "SerdeInfo": {"SerializationLibrary": "org.openx.data.jsonserde.JsonSerDe"},
+        },
+    }
+    assert _detect_format(table) == "json"
 
 
 def test_detect_format_iceberg():
@@ -176,6 +198,33 @@ def test_discover_catalog_glue_disabled_skips_glue_entirely():
         catalog = discover_catalog(config)
     mock_session.assert_not_called()
     assert catalog == {}
+
+
+def test_ensure_registered_json_source_with_gzipped_records(duck_conn, moto_server):
+    import gzip
+    import json as json_module
+
+    s3 = boto3.client(
+        "s3",
+        region_name="eu-central-1",
+        endpoint_url=f"http://{moto_server}",
+        aws_access_key_id="test",
+        aws_secret_access_key="test",
+    )
+    s3.create_bucket(
+        Bucket="json-bucket", CreateBucketConfiguration={"LocationConstraint": "eu-central-1"}
+    )
+    body = gzip.compress(json_module.dumps({"Records": [{"id": 1}, {"id": 2}]}).encode())
+    s3.put_object(Bucket="json-bucket", Key="logs/trail.json.gz", Body=body)
+    _configure_duck_s3(duck_conn, moto_server)
+
+    catalog = {"trail": TableSpec(path="s3://json-bucket/logs/", format="json")}
+    registered = set()
+    ensure_registered(duck_conn, catalog, "SELECT * FROM trail, UNNEST(trail.Records)", registered)
+
+    assert registered == {"trail"}
+    count = duck_conn.execute('SELECT COUNT(*) FROM "trail", UNNEST("trail".Records)').fetchone()[0]
+    assert count == 2
 
 
 def test_ensure_registered_registers_matching_bare_name(
