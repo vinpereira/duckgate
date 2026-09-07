@@ -32,13 +32,15 @@ def test_create_connection_returns_duckdb_connection(minimal_config):
     conn.close()
 
 
-def test_create_connection_injects_region(minimal_config):
+def test_create_connection_creates_s3_secret(minimal_config):
     mock_session = MagicMock()
     mock_session.get_credentials.return_value = _mock_credentials()
     with patch("duckgate.engine.boto3.Session", return_value=mock_session):
         conn = create_connection(minimal_config)
-    result = conn.execute("SELECT current_setting('s3_region')").fetchone()[0]
-    assert result == "eu-central-1"
+    secrets = conn.execute("SELECT type, secret_string FROM duckdb_secrets()").fetchall()
+    assert len(secrets) == 1
+    assert secrets[0][0] == "s3"
+    assert "region=eu-central-1" in secrets[0][1]
     conn.close()
 
 
