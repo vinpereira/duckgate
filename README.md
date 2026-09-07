@@ -128,6 +128,7 @@ since a named profile lookup ignores ambient environment variables — configure
 | Parquet | `read_parquet('s3://...')` via httpfs                |
 | Iceberg | `iceberg_scan('s3://...')` via the iceberg extension  |
 | CSV     | `read_csv('s3://...')` via httpfs                     |
+| JSON    | `read_json('s3://...')` via httpfs (gzip auto-detected) |
 
 ## Development
 

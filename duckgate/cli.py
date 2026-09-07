@@ -132,7 +132,7 @@ def init_cmd(path_str):
         "# [[sources]]\n"
         '# name   = "my_table"\n'
         '# path   = "s3://my-bucket/prefix/**/*.parquet"\n'
-        '# format = "parquet"  # parquet | iceberg | csv\n'
+        '# format = "parquet"  # parquet | iceberg | csv | json\n'
     )
     path.write_text(template)
     click.echo(f"Created {path}")

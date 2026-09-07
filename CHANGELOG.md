@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-07
+
+### Added
+
+- `format = "json"` for `[[sources]]`/Glue-detected tables, via `read_json`. Detected from a
+  Glue table's JSON SerDe (`org.openx.data.jsonserde.JsonSerDe` and similar). A bare-prefix
+  JSON location globs as `**/*.json*` (not `**/*.json`) so it also matches gzipped files like
+  CloudTrail's `*.json.gz`.
+- `spatial` extension loaded on every connection — enables `ST_*` geo functions directly on
+  position/GPS data.
+
+### Changed
+
+- Credentials are now injected via `CREATE SECRET` instead of four `SET s3_*` statements.
+  Avoids interpolating the access key/secret/session token into SQL text.
+
 ## [0.4.0] - 2026-09-05
 
 ### Breaking
