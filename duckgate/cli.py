@@ -2,7 +2,7 @@ from pathlib import Path
 
 import click
 
-from duckgate.catalog import describe_table, discover_catalog, run_query
+from duckgate.catalog import apply_default_limit, describe_table, discover_catalog, run_query
 from duckgate.config import find_config, load_config
 from duckgate.engine import create_connection
 
@@ -22,8 +22,15 @@ def _build_conn(config):
     default="table",
     help="Output format for -q (default: table)",
 )
+@click.option(
+    "--limit",
+    "limit_override",
+    type=int,
+    default=None,
+    help="Override the default row limit (0 disables it)",
+)
 @click.pass_context
-def cli(ctx, query_str, output_format):
+def cli(ctx, query_str, output_format, limit_override):
     """Interactive SQL shell over S3 data using DuckDB."""
     if ctx.invoked_subcommand is not None:
         return
@@ -34,10 +41,12 @@ def cli(ctx, query_str, output_format):
         raise SystemExit(1) from e
 
     conn, catalog = _build_conn(config)
+    effective_limit = limit_override if limit_override is not None else config.query.default_limit
 
     if query_str:
         try:
-            df = run_query(conn, catalog, query_str, set()).fetchdf()
+            sql = apply_default_limit(query_str, effective_limit)
+            df = run_query(conn, catalog, sql, set()).fetchdf()
             if output_format == "csv":
                 click.echo(df.to_csv(index=False), nl=False)
             elif output_format == "json":
@@ -50,7 +59,7 @@ def cli(ctx, query_str, output_format):
     else:
         from duckgate.shell import run_shell
 
-        run_shell(conn, catalog)
+        run_shell(conn, catalog, effective_limit)
 
 
 @cli.command()

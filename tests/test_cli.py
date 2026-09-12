@@ -131,3 +131,21 @@ def test_one_shot_query_json_format(runner, config_toml):
         result = runner.invoke(cli, ["-q", "SELECT 42 AS answer", "--format", "json"])
     assert result.exit_code == 0
     assert "42" in result.output
+
+
+def test_one_shot_query_default_limit_wraps_query(runner, config_toml):
+    mock = _mock_session_no_glue()
+    with patch(ENGINE_SESSION, return_value=mock):
+        result = runner.invoke(cli, ["-q", "SELECT 42 AS answer"])
+    assert result.exit_code == 0
+    assert "42" in result.output
+    assert "Note: no LIMIT" in result.output
+
+
+def test_one_shot_query_limit_zero_disables_wrapping(runner, config_toml):
+    mock = _mock_session_no_glue()
+    with patch(ENGINE_SESSION, return_value=mock):
+        result = runner.invoke(cli, ["-q", "SELECT 42 AS answer", "--limit", "0"])
+    assert result.exit_code == 0
+    assert "42" in result.output
+    assert "Warning: no LIMIT" in result.output
