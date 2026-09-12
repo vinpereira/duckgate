@@ -10,6 +10,7 @@ from duckgate.catalog import (
     _detect_format,
     _make_view_sql,
     _source_expr,
+    apply_default_limit,
     describe_table,
     discover_catalog,
     ensure_registered,
@@ -61,6 +62,41 @@ def test_source_expr_json_adds_glob_with_gz_wildcard():
 def test_source_expr_json_leaves_explicit_glob_unchanged():
     sql = _source_expr("s3://bucket/logs/**/*.json.gz", "json")
     assert sql == "read_json('s3://bucket/logs/**/*.json.gz')"
+
+
+def test_apply_default_limit_passthrough_when_limit_present():
+    sql = apply_default_limit("SELECT * FROM t LIMIT 10", default_limit=100)
+    assert sql == "SELECT * FROM t LIMIT 10"
+
+
+def test_apply_default_limit_disabled_prints_plain_warning(capsys):
+    sql = apply_default_limit("SELECT * FROM t", default_limit=0)
+    assert sql == "SELECT * FROM t"
+    assert "Warning: no LIMIT" in capsys.readouterr().err
+
+
+def test_apply_default_limit_wraps_select(capsys):
+    sql = apply_default_limit("SELECT * FROM t", default_limit=100)
+    assert sql == "SELECT * FROM (SELECT * FROM t) LIMIT 100"
+    err = capsys.readouterr().err
+    assert "Note: no LIMIT" in err
+    assert "100" in err
+
+
+def test_apply_default_limit_wraps_with_cte():
+    sql = apply_default_limit("WITH x AS (SELECT 1) SELECT * FROM x", default_limit=50)
+    assert sql == "SELECT * FROM (WITH x AS (SELECT 1) SELECT * FROM x) LIMIT 50"
+
+
+def test_apply_default_limit_strips_trailing_semicolon():
+    sql = apply_default_limit("SELECT * FROM t;", default_limit=100)
+    assert sql == "SELECT * FROM (SELECT * FROM t) LIMIT 100"
+
+
+def test_apply_default_limit_skips_non_select_statements(capsys):
+    sql = apply_default_limit("PRAGMA table_info('t')", default_limit=100)
+    assert sql == "PRAGMA table_info('t')"
+    assert "Warning: no LIMIT" in capsys.readouterr().err
 
 
 def test_detect_format_json_from_serde():
@@ -422,7 +458,7 @@ def test_run_query_reraises_for_genuinely_unknown_table(duck_conn):
         run_query(duck_conn, {}, "SELECT * FROM totally_unknown_table", set())
 
 
-def test_run_query_warns_when_no_limit(duck_conn, sample_parquet_bytes, moto_server, capsys):
+def test_default_limit_integration_caps_rows(duck_conn, sample_parquet_bytes, moto_server):
     s3 = boto3.client(
         "s3",
         region_name="eu-central-1",
@@ -431,41 +467,20 @@ def test_run_query_warns_when_no_limit(duck_conn, sample_parquet_bytes, moto_ser
         aws_secret_access_key="test",
     )
     s3.create_bucket(
-        Bucket="limit-warn-bucket",
+        Bucket="limit-integration-bucket",
         CreateBucketConfiguration={"LocationConstraint": "eu-central-1"},
     )
-    s3.put_object(Bucket="limit-warn-bucket", Key="data/file.parquet", Body=sample_parquet_bytes)
+    s3.put_object(
+        Bucket="limit-integration-bucket", Key="data/file.parquet", Body=sample_parquet_bytes
+    )
     _configure_duck_s3(duck_conn, moto_server)
 
     catalog = {
-        "my_table": TableSpec(path="s3://limit-warn-bucket/data/*.parquet", format="parquet")
+        "my_table": TableSpec(path="s3://limit-integration-bucket/data/*.parquet", format="parquet")
     }
-    run_query(duck_conn, catalog, "SELECT * FROM my_table", set())
-
-    assert "LIMIT" in capsys.readouterr().err
-
-
-def test_run_query_no_warning_when_limit_present(
-    duck_conn, sample_parquet_bytes, moto_server, capsys
-):
-    s3 = boto3.client(
-        "s3",
-        region_name="eu-central-1",
-        endpoint_url=f"http://{moto_server}",
-        aws_access_key_id="test",
-        aws_secret_access_key="test",
-    )
-    s3.create_bucket(
-        Bucket="limit-ok-bucket",
-        CreateBucketConfiguration={"LocationConstraint": "eu-central-1"},
-    )
-    s3.put_object(Bucket="limit-ok-bucket", Key="data/file.parquet", Body=sample_parquet_bytes)
-    _configure_duck_s3(duck_conn, moto_server)
-
-    catalog = {"my_table": TableSpec(path="s3://limit-ok-bucket/data/*.parquet", format="parquet")}
-    run_query(duck_conn, catalog, "SELECT * FROM my_table LIMIT 5", set())
-
-    assert capsys.readouterr().err == ""
+    sql = apply_default_limit("SELECT * FROM my_table", default_limit=2)
+    rows = run_query(duck_conn, catalog, sql, set()).fetchall()
+    assert len(rows) == 2
 
 
 def test_describe_table_shows_columns(duck_conn, sample_parquet_bytes, moto_server):

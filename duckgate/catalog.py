@@ -69,11 +69,6 @@ def run_query(
     registered: set[str],
 ) -> duckdb.DuckDBPyRelation:
     ensure_registered(conn, catalog, sql, registered)
-    if not re.search(r"\blimit\b", sql, re.IGNORECASE):
-        click.echo(
-            "Warning: no LIMIT — this query may scan a lot of data.",
-            err=True,
-        )
     for _ in range(len(catalog) + 1):
         try:
             return conn.execute(sql)
@@ -86,6 +81,24 @@ def run_query(
             _try_register(conn, missing, spec.path, spec.format)
             registered.add(missing)
     raise RuntimeError("could not resolve all tables referenced by the query")
+
+
+def apply_default_limit(sql: str, default_limit: int) -> str:
+    if re.search(r"\blimit\b", sql, re.IGNORECASE):
+        return sql
+    if default_limit <= 0:
+        click.echo("Warning: no LIMIT — this query may scan a lot of data.", err=True)
+        return sql
+    stripped = sql.strip().rstrip(";").strip()
+    if not re.match(r"(?is)^(select|with)\b", stripped):
+        click.echo("Warning: no LIMIT — this query may scan a lot of data.", err=True)
+        return sql
+    click.echo(
+        f"Note: no LIMIT — capping output at {default_limit} rows "
+        "(doesn't reduce scan time for aggregates). Use --limit 0 to disable.",
+        err=True,
+    )
+    return f"SELECT * FROM ({stripped}) LIMIT {default_limit}"
 
 
 def _try_register(conn: duckdb.DuckDBPyConnection, name: str, path: str, fmt: str) -> bool:
