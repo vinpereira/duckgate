@@ -109,9 +109,15 @@ Data Catalog required at all — `[[sources]]` is all you need.
 
 ### Query safety
 
-`-q` and the shell print a warning to stderr when a query has no `LIMIT` clause. This only
-flags the risk — it doesn't rewrite the query, and it can't help an aggregate
-(`COUNT(*)`, `GROUP BY`) that has to scan the whole table regardless of any `LIMIT`.
+`-q` and the shell cap any `SELECT`/`WITH` query with no `LIMIT` at `[query] default_limit`
+(default 100) — wrapping it as `SELECT * FROM (<query>) LIMIT N`, verified to not defeat
+DuckDB's limit pushdown for a plain `SELECT * FROM table`. Override per-invocation with
+`--limit N` (`0` disables it), or per-session in the shell with `\limit N`/`\nolimit`.
+
+This **doesn't help aggregates** — `COUNT(*)`/`GROUP BY` still has to scan the whole table to
+produce its one output row no matter what wraps around it. When default-limiting doesn't
+apply (disabled, or a statement shape that isn't a plain `SELECT`/`WITH`), you get a plain
+stderr warning instead so you know a big scan might be about to happen.
 
 ## AWS credentials
 

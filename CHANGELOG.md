@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-13
+
+### Added
+
+- `[query] default_limit` config (default 100), `--limit N` CLI flag, and `\limit N`/
+  `\nolimit` shell meta-commands. A `SELECT`/`WITH` query with no `LIMIT` is now capped by
+  default instead of just warned about — verified via `EXPLAIN` that wrapping it as
+  `SELECT * FROM (<query>) LIMIT N` doesn't defeat DuckDB's limit pushdown. Still doesn't
+  reduce scan cost for aggregates (`COUNT(*)`, `GROUP BY`) — those still get the plain
+  stderr warning instead of a silently-wrong sense of safety.
+
 ## [0.5.0] - 2026-09-07
 
 ### Added
