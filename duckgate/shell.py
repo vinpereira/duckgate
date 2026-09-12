@@ -4,13 +4,14 @@ import click
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import InMemoryHistory
 
-from duckgate.catalog import run_query
+from duckgate.catalog import apply_default_limit, run_query
 
 
-def run_shell(conn, catalog):
+def run_shell(conn, catalog, default_limit):
     session = PromptSession(history=InMemoryHistory())
     registered = set()
-    click.echo("duckgate  •  type SQL and Enter to run  •  \\q to exit")
+    limit = default_limit
+    click.echo("duckgate  •  type SQL and Enter to run  •  \\q to exit  •  \\limit N / \\nolimit")
 
     while True:
         try:
@@ -23,9 +24,22 @@ def run_shell(conn, catalog):
             continue
         if text.lower() in ("\\q", "exit", "quit"):
             break
+        if text.lower() == "\\nolimit":
+            limit = 0
+            click.echo("Row limit disabled for this session.")
+            continue
+        if text.lower().startswith("\\limit"):
+            parts = text.split()
+            if len(parts) == 2 and parts[1].isdigit():
+                limit = int(parts[1])
+                click.echo(f"Row limit set to {limit}.")
+            else:
+                click.echo("Usage: \\limit N", err=True)
+            continue
 
         try:
-            df = _execute(conn, catalog, registered, text)
+            sql = apply_default_limit(text, limit)
+            df = _execute(conn, catalog, registered, sql)
             click.echo("(0 rows)" if df.empty else df.to_string(index=False))
         except Exception as e:
             click.echo(f"Error: {e}", err=True)
