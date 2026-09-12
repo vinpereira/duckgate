@@ -23,10 +23,16 @@ class SourceConfig:
 
 
 @dataclass
+class QueryConfig:
+    default_limit: int = 100
+
+
+@dataclass
 class Config:
     aws: AwsConfig
     glue: GlueConfig = field(default_factory=GlueConfig)
     sources: list[SourceConfig] = field(default_factory=list)
+    query: QueryConfig = field(default_factory=QueryConfig)
 
 
 def find_config() -> Path:
@@ -52,4 +58,6 @@ def load_config(path: Path) -> Config:
         databases=glue_data.get("databases", []),
     )
     sources = [SourceConfig(**s) for s in data.get("sources", [])]
-    return Config(aws=aws, glue=glue, sources=sources)
+    query_data = data.get("query", {})
+    query = QueryConfig(default_limit=query_data.get("default_limit", 100))
+    return Config(aws=aws, glue=glue, sources=sources, query=query)

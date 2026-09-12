@@ -44,3 +44,17 @@ def test_find_config_not_found(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     with pytest.raises(FileNotFoundError, match="duckgate init"):
         find_config()
+
+
+def test_load_config_default_query_limit(tmp_path):
+    toml = tmp_path / "duckgate.toml"
+    toml.write_text('[aws]\nprofile = "p"\nregion = "r"\n')
+    config = load_config(toml)
+    assert config.query.default_limit == 100
+
+
+def test_load_config_custom_query_limit(tmp_path):
+    toml = tmp_path / "duckgate.toml"
+    toml.write_text('[aws]\nprofile = "p"\nregion = "r"\n[query]\ndefault_limit = 25\n')
+    config = load_config(toml)
+    assert config.query.default_limit == 25
