@@ -149,3 +149,21 @@ def test_one_shot_query_limit_zero_disables_wrapping(runner, config_toml):
     assert result.exit_code == 0
     assert "42" in result.output
     assert "Warning: no LIMIT" in result.output
+
+
+def test_one_shot_query_timeout_cancels_slow_query(runner, config_toml):
+    mock = _mock_session_no_glue()
+    with patch(ENGINE_SESSION, return_value=mock):
+        result = runner.invoke(
+            cli,
+            [
+                "-q",
+                "SELECT count(*) FROM range(100000000) t1, range(1000) t2",
+                "--limit",
+                "0",
+                "--timeout",
+                "1",
+            ],
+        )
+    assert result.exit_code != 0
+    assert "query canceled: exceeded 1s timeout" in result.output

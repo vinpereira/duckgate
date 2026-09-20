@@ -2,7 +2,12 @@ from pathlib import Path
 
 import click
 
-from duckgate.catalog import apply_default_limit, describe_table, discover_catalog, run_query
+from duckgate.catalog import (
+    apply_default_limit,
+    describe_table,
+    discover_catalog,
+    run_query_with_timeout,
+)
 from duckgate.config import find_config, load_config
 from duckgate.engine import create_connection
 
@@ -29,8 +34,15 @@ def _build_conn(config):
     default=None,
     help="Override the default row limit (0 disables it)",
 )
+@click.option(
+    "--timeout",
+    "timeout_override",
+    type=int,
+    default=None,
+    help="Override the query timeout in seconds (0 disables it)",
+)
 @click.pass_context
-def cli(ctx, query_str, output_format, limit_override):
+def cli(ctx, query_str, output_format, limit_override, timeout_override):
     """Interactive SQL shell over S3 data using DuckDB."""
     if ctx.invoked_subcommand is not None:
         return
@@ -42,11 +54,14 @@ def cli(ctx, query_str, output_format, limit_override):
 
     conn, catalog = _build_conn(config)
     effective_limit = limit_override if limit_override is not None else config.query.default_limit
+    effective_timeout = (
+        timeout_override if timeout_override is not None else config.query.timeout_seconds
+    )
 
     if query_str:
         try:
             sql = apply_default_limit(query_str, effective_limit)
-            df = run_query(conn, catalog, sql, set()).fetchdf()
+            df = run_query_with_timeout(conn, catalog, sql, set(), effective_timeout).fetchdf()
             if output_format == "csv":
                 click.echo(df.to_csv(index=False), nl=False)
             elif output_format == "json":
@@ -59,7 +74,7 @@ def cli(ctx, query_str, output_format, limit_override):
     else:
         from duckgate.shell import run_shell
 
-        run_shell(conn, catalog, effective_limit)
+        run_shell(conn, catalog, effective_limit, effective_timeout)
 
 
 @cli.command()
