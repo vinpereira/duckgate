@@ -119,6 +119,11 @@ produce its one output row no matter what wraps around it. When default-limiting
 apply (disabled, or a statement shape that isn't a plain `SELECT`/`WITH`), you get a plain
 stderr warning instead so you know a big scan might be about to happen.
 
+A query can also be capped by wall-clock time via `[query] timeout_seconds` (default `0`,
+disabled), `--timeout N`, or the shell's `\timeout N`/`\notimeout`. Unlike the row limit, this
+*does* bound an aggregate's scan time — after N seconds the query is canceled outright
+(`Error: query canceled: exceeded Ns timeout`), regardless of what shape the query is.
+
 ## AWS credentials
 
 Uses the AWS profile from `[aws] profile`, resolved via `boto3.Session(profile_name=...)`.

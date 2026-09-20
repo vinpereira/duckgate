@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-20
+
+### Added
+
+- `[query] timeout_seconds` config (default 0, disabled), `--timeout N` CLI flag, and
+  `\timeout N`/`\notimeout` shell meta-commands. Cancels a running query after N seconds via
+  `conn.interrupt()` on a background timer — verified this reliably raises
+  `duckdb.InterruptException` mid-scan, is a harmless no-op when nothing is running, and
+  leaves the connection usable afterward. Unlike the default row LIMIT (v0.6.0), this bounds
+  wall-clock time for aggregates too, since it cancels the query outright rather than
+  wrapping it.
+
 ## [0.6.0] - 2026-09-13
 
 ### Added

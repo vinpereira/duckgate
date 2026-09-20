@@ -159,7 +159,8 @@ def init_cmd(path_str):
         '# format = "parquet"  # parquet | iceberg | csv | json\n'
         "\n"
         "# [query]\n"
-        "# default_limit = 100  # 0 disables auto-limiting queries with no LIMIT\n"
+        "# default_limit   = 100  # 0 disables auto-limiting queries with no LIMIT\n"
+        "# timeout_seconds = 0    # cancel a query after N seconds (0 = no timeout)\n"
     )
     path.write_text(template)
     click.echo(f"Created {path}")
