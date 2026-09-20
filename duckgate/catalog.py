@@ -1,4 +1,5 @@
 import re
+import threading
 from dataclasses import dataclass
 
 import boto3
@@ -81,6 +82,29 @@ def run_query(
             _try_register(conn, missing, spec.path, spec.format)
             registered.add(missing)
     raise RuntimeError("could not resolve all tables referenced by the query")
+
+
+class QueryTimeoutError(Exception):
+    pass
+
+
+def run_query_with_timeout(
+    conn: duckdb.DuckDBPyConnection,
+    catalog: dict[str, TableSpec],
+    sql: str,
+    registered: set[str],
+    timeout_seconds: int,
+) -> duckdb.DuckDBPyRelation:
+    if timeout_seconds <= 0:
+        return run_query(conn, catalog, sql, registered)
+    timer = threading.Timer(timeout_seconds, conn.interrupt)
+    timer.start()
+    try:
+        return run_query(conn, catalog, sql, registered)
+    except duckdb.InterruptException as e:
+        raise QueryTimeoutError(f"query canceled: exceeded {timeout_seconds}s timeout") from e
+    finally:
+        timer.cancel()
 
 
 def apply_default_limit(sql: str, default_limit: int) -> str:

@@ -6,6 +6,7 @@ import pytest
 from moto import mock_aws
 
 from duckgate.catalog import (
+    QueryTimeoutError,
     TableSpec,
     _detect_format,
     _make_view_sql,
@@ -15,6 +16,7 @@ from duckgate.catalog import (
     discover_catalog,
     ensure_registered,
     run_query,
+    run_query_with_timeout,
 )
 from duckgate.config import AwsConfig, Config, GlueConfig, SourceConfig
 
@@ -456,6 +458,32 @@ def test_run_query_falls_back_on_catalog_exception(duck_conn, sample_parquet_byt
 def test_run_query_reraises_for_genuinely_unknown_table(duck_conn):
     with pytest.raises(duckdb.CatalogException):
         run_query(duck_conn, {}, "SELECT * FROM totally_unknown_table", set())
+
+
+def test_run_query_with_timeout_disabled_skips_timer(duck_conn):
+    with patch("duckgate.catalog.threading.Timer") as mock_timer:
+        run_query_with_timeout(duck_conn, {}, "SELECT 1", set(), timeout_seconds=0)
+    mock_timer.assert_not_called()
+
+
+def test_run_query_with_timeout_fast_query_unaffected(duck_conn):
+    result = run_query_with_timeout(duck_conn, {}, "SELECT 1", set(), timeout_seconds=30)
+    assert result.fetchone() == (1,)
+
+
+def test_run_query_with_timeout_cancels_slow_query(duck_conn):
+    slow_sql = "SELECT count(*) FROM range(100000000) t1, range(1000) t2"
+    with pytest.raises(QueryTimeoutError, match="1s timeout"):
+        run_query_with_timeout(duck_conn, {}, slow_sql, set(), timeout_seconds=1)
+
+
+def test_run_query_with_timeout_connection_reusable_after_timeout(duck_conn):
+    slow_sql = "SELECT count(*) FROM range(100000000) t1, range(1000) t2"
+    with pytest.raises(QueryTimeoutError):
+        run_query_with_timeout(duck_conn, {}, slow_sql, set(), timeout_seconds=1)
+
+    result = run_query_with_timeout(duck_conn, {}, "SELECT 42", set(), timeout_seconds=30)
+    assert result.fetchone() == (42,)
 
 
 def test_default_limit_integration_caps_rows(duck_conn, sample_parquet_bytes, moto_server):
