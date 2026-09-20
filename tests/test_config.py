@@ -58,3 +58,17 @@ def test_load_config_custom_query_limit(tmp_path):
     toml.write_text('[aws]\nprofile = "p"\nregion = "r"\n[query]\ndefault_limit = 25\n')
     config = load_config(toml)
     assert config.query.default_limit == 25
+
+
+def test_load_config_default_query_timeout(tmp_path):
+    toml = tmp_path / "duckgate.toml"
+    toml.write_text('[aws]\nprofile = "p"\nregion = "r"\n')
+    config = load_config(toml)
+    assert config.query.timeout_seconds == 0
+
+
+def test_load_config_custom_query_timeout(tmp_path):
+    toml = tmp_path / "duckgate.toml"
+    toml.write_text('[aws]\nprofile = "p"\nregion = "r"\n[query]\ntimeout_seconds = 30\n')
+    config = load_config(toml)
+    assert config.query.timeout_seconds == 30

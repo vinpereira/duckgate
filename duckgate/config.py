@@ -25,6 +25,7 @@ class SourceConfig:
 @dataclass
 class QueryConfig:
     default_limit: int = 100
+    timeout_seconds: int = 0
 
 
 @dataclass
@@ -59,5 +60,8 @@ def load_config(path: Path) -> Config:
     )
     sources = [SourceConfig(**s) for s in data.get("sources", [])]
     query_data = data.get("query", {})
-    query = QueryConfig(default_limit=query_data.get("default_limit", 100))
+    query = QueryConfig(
+        default_limit=query_data.get("default_limit", 100),
+        timeout_seconds=query_data.get("timeout_seconds", 0),
+    )
     return Config(aws=aws, glue=glue, sources=sources, query=query)
