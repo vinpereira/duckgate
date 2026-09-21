@@ -2,6 +2,13 @@
 
 Interactive SQL shell over S3 data (Parquet, Iceberg, CSV) using DuckDB.
 
+At its core, `duckgate` queries S3 Parquet/Iceberg directly through DuckDB's `httpfs` —
+no warehouse, no Athena, no data movement. That's the same engine-level trick behind
+DuckDB's current momentum as a fast local alternative for ad hoc analytics on a data
+lake. `duckgate` was originally built to solve a narrower annoyance — not having to type
+out S3 paths by hand — but that convenience layer sits on top of this same direct-S3
+querying, which is the part that actually does the heavy lifting.
+
 ## What duckgate adds on top of DuckDB
 
 The SQL engine is unmodified DuckDB — every query, join, and function runs exactly as it
