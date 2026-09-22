@@ -95,14 +95,15 @@ path   = "s3://my-bucket/structured/sqlserver/dev/fis/location/**/*.parquet"
 format = "parquet"  # parquet | iceberg | csv
 ```
 
-Set `[glue] enabled = false` to use `duckgate` purely as a named-S3-sources tool, no Glue
-Data Catalog required at all — `[[sources]]` is all you need.
+`[glue] enabled` defaults to `false` — `duckgate` works purely as a named-S3-sources tool with
+no Glue Data Catalog required at all, `[[sources]]` is all you need. Set `enabled = true`
+explicitly (as in the example above) to also discover tables from Glue.
 
 ### Source resolution
 
-- **Glue tables** are discovered automatically from the configured databases (skip this
-  entirely with `[glue] enabled = false`). A bare Glue table location (no wildcard) is read
-  as `location/**/*.<format>`.
+- **Glue tables** are discovered automatically from the configured databases, once `[glue]
+  enabled = true` is set. A bare Glue table location (no wildcard) is read as
+  `location/**/*.<format>`.
 - **Local `[[sources]]`** entries override Glue tables with the same name — use this to point
   to a specific environment prefix, or to name S3 data that isn't in Glue at all.
 - If two Glue tables from different databases share a name, they are registered as

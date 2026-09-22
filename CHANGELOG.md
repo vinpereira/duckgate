@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-22
+
+### Breaking
+
+- `[glue] enabled` now defaults to `false` (was `true`). Any `duckgate.toml` that omits the
+  `[glue]` section, or has `[glue]` without an explicit `enabled` key, no longer discovers
+  Glue tables — add `enabled = true` to keep the previous behavior. Motivation: Glue
+  discovery alone measured ~1.5–1.9s against a real 4-database config, roughly doubling wall
+  time for a direct S3 query that never touches the catalog (this project's own README-
+  highlighted "querying S3 without any config" use case) — see
+  `docs/duckgate-vs-athena-performance.md` and
+  `docs/superpowers/specs/2026-09-22-glue-optout-and-iceberg-version-hint-design.md`.
+
+### Fixed
+
+- Iceberg tables with no `version-hint.text` now readable — `engine.py` sets
+  `unsafe_enable_version_guessing = true` on every connection. Hit for real on a production
+  Glue-cataloged table during the same benchmark.
+
 ## [0.7.0] - 2026-09-20
 
 ### Added
