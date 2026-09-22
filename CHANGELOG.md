@@ -19,6 +19,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `docs/duckgate-vs-athena-performance.md` and
   `docs/superpowers/specs/2026-09-22-glue-optout-and-iceberg-version-hint-design.md`.
 
+### Added
+
+- `--no-glue` flag to skip Glue catalog discovery for a single `-q`/shell invocation — for
+  someone who has `[glue] enabled = true` configured but wants to skip it for one query.
+
 ### Fixed
 
 - Iceberg tables with no `version-hint.text` now readable — `engine.py` sets

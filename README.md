@@ -47,6 +47,10 @@ location directly" — the trade-off is you type the full path every time and it
 in `duckgate tables`/`describe`. Give it a name via `[[sources]]` (below) when you want either
 of those.
 
+Pass `--no-glue` to skip Glue catalog discovery entirely for that one invocation (only local
+`[[sources]]` stay available) — useful when `[glue] enabled = true` is configured but you
+know this particular query doesn't need it.
+
 ## Install
 
 `duckgate` is a CLI tool, so an isolated install is recommended over a bare `pip install`:
