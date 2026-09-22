@@ -26,7 +26,8 @@ Glue Data Catalog behind it.
 | Point at another environment | Rewrite the query with a different path | `[[sources]]` overrides a Glue table by name, no catalog edits |
 | Registering many tables | N/A — you only use what you write | Lazy, on-demand, once per session |
 | One broken table (bad perms, empty) | You just don't query what you don't know about | Rest of the catalog keeps working, warning printed |
-| Query with no `LIMIT` | No warning | Warned on stderr (`-q` and the shell) |
+| Query with no `LIMIT` | No cap | Capped at `[query] default_limit` rows by default (see below) |
+| `ST_*` spatial functions | Requires `INSTALL spatial; LOAD spatial;` yourself | Loaded on every connection |
 
 Where plain DuckDB already holds its own: the `duckdb` CLI has its own polished interactive
 shell (history, autocomplete, `.mode`) and a `-c "query"` one-shot flag. `duckgate`'s shell is
@@ -152,6 +153,9 @@ since a named profile lookup ignores ambient environment variables — configure
 | Iceberg | `iceberg_scan('s3://...')` via the iceberg extension  |
 | CSV     | `read_csv('s3://...')` via httpfs                     |
 | JSON    | `read_json('s3://...')` via httpfs (gzip auto-detected) |
+
+The `spatial` extension is loaded on every connection — `ST_*` functions (`ST_Point`,
+`ST_AsText`, etc.) work directly on position/GPS columns with no extra setup.
 
 ## Development
 
