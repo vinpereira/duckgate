@@ -11,7 +11,7 @@ class AwsConfig:
 
 @dataclass
 class GlueConfig:
-    enabled: bool = True
+    enabled: bool = False
     databases: list[str] = field(default_factory=list)
 
 
@@ -55,7 +55,7 @@ def load_config(path: Path) -> Config:
     aws = AwsConfig(**data["aws"])
     glue_data = data.get("glue", {})
     glue = GlueConfig(
-        enabled=glue_data.get("enabled", True),
+        enabled=glue_data.get("enabled", False),
         databases=glue_data.get("databases", []),
     )
     sources = [SourceConfig(**s) for s in data.get("sources", [])]

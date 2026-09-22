@@ -9,9 +9,23 @@ def test_load_minimal_config(tmp_path):
     config = load_config(toml)
     assert config.aws.profile == "test-profile"
     assert config.aws.region == "eu-central-1"
-    assert config.glue.enabled is True
+    assert config.glue.enabled is False
     assert config.glue.databases == []
     assert config.sources == []
+
+
+def test_load_config_glue_disabled_by_default(tmp_path):
+    toml = tmp_path / "duckgate.toml"
+    toml.write_text('[aws]\nprofile = "p"\nregion = "r"\n')
+    config = load_config(toml)
+    assert config.glue.enabled is False
+
+
+def test_load_config_glue_enabled_explicit(tmp_path):
+    toml = tmp_path / "duckgate.toml"
+    toml.write_text('[aws]\nprofile = "p"\nregion = "r"\n[glue]\nenabled = true\n')
+    config = load_config(toml)
+    assert config.glue.enabled is True
 
 
 def test_load_config_with_local_source(tmp_path):
