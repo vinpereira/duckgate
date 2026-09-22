@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 
 import click
@@ -41,8 +42,15 @@ def _build_conn(config):
     default=None,
     help="Override the query timeout in seconds (0 disables it)",
 )
+@click.option(
+    "--no-glue",
+    "no_glue",
+    is_flag=True,
+    default=False,
+    help="Skip Glue catalog discovery for this run (only local [[sources]] are available)",
+)
 @click.pass_context
-def cli(ctx, query_str, output_format, limit_override, timeout_override):
+def cli(ctx, query_str, output_format, limit_override, timeout_override, no_glue):
     """Interactive SQL shell over S3 data using DuckDB."""
     if ctx.invoked_subcommand is not None:
         return
@@ -51,6 +59,9 @@ def cli(ctx, query_str, output_format, limit_override, timeout_override):
     except FileNotFoundError as e:
         click.echo(str(e), err=True)
         raise SystemExit(1) from e
+
+    if no_glue:
+        config = replace(config, glue=replace(config.glue, enabled=False))
 
     conn, catalog = _build_conn(config)
     effective_limit = limit_override if limit_override is not None else config.query.default_limit

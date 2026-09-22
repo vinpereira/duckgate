@@ -167,3 +167,22 @@ def test_one_shot_query_timeout_cancels_slow_query(runner, config_toml):
         )
     assert result.exit_code != 0
     assert "query canceled: exceeded 1s timeout" in result.output
+
+
+def test_no_glue_flag_skips_glue_discovery(runner, tmp_path, monkeypatch):
+    # duckgate.engine.boto3.Session and duckgate.catalog.boto3.Session both resolve to the
+    # same shared `boto3` module's Session attribute — patch it once, not twice, or the two
+    # patches clobber each other.
+    monkeypatch.chdir(tmp_path)
+    toml = tmp_path / "duckgate.toml"
+    toml.write_text(
+        '[aws]\nprofile = "test"\nregion = "eu-central-1"\n'
+        '[glue]\nenabled = true\ndatabases = ["my_db"]\n'
+    )
+    mock = _mock_session_no_glue()
+    with patch(ENGINE_SESSION, return_value=mock):
+        result = runner.invoke(cli, ["-q", "SELECT 42 AS answer", "--no-glue"])
+    assert result.exit_code == 0
+    assert "42" in result.output
+    # only _discover_glue ever calls session.client("glue", ...) — create_connection doesn't
+    mock.client.assert_not_called()
