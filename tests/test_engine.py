@@ -71,3 +71,13 @@ def test_create_connection_loads_spatial_extension(minimal_config):
     result = conn.execute("SELECT ST_AsText(ST_Point(1, 1))").fetchone()[0]
     assert result == "POINT (1 1)"
     conn.close()
+
+
+def test_create_connection_enables_iceberg_version_guessing(minimal_config):
+    mock_session = MagicMock()
+    mock_session.get_credentials.return_value = _mock_credentials()
+    with patch("duckgate.engine.boto3.Session", return_value=mock_session):
+        conn = create_connection(minimal_config)
+    result = conn.execute("SELECT current_setting('unsafe_enable_version_guessing')").fetchone()[0]
+    assert result is True
+    conn.close()
