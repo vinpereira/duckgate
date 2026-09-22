@@ -30,6 +30,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `unsafe_enable_version_guessing = true` on every connection. Hit for real on a production
   Glue-cataloged table during the same benchmark.
 
+### Docs
+
+- README caught up on drift from earlier releases: the comparison table still described the
+  v0.3.0 plain-warning LIMIT behavior instead of the v0.6.0 default-capping one; the `spatial`
+  extension (v0.5.0) and the `json` source format (v0.5.0) were never mentioned at all.
+
 ## [0.7.0] - 2026-09-20
 
 ### Added
