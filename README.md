@@ -52,6 +52,19 @@ Pass `--no-glue` to skip Glue catalog discovery entirely for that one invocation
 `[[sources]]` stay available) — useful when `[glue] enabled = true` is configured but you
 know this particular query doesn't need it.
 
+### Writing results out
+
+duckgate is primarily a read tool, but it doesn't restrict what SQL you run — DuckDB's native
+`COPY TO` works in both `-q` and the shell exactly like any other statement, since the
+connection already has S3 credentials configured:
+
+```sql
+COPY (SELECT * FROM my_table WHERE ...) TO 's3://bucket/prefix/output.parquet' (FORMAT PARQUET)
+```
+
+No dedicated duckgate flag or command for this — it's plain DuckDB SQL, this just documents
+that it works.
+
 ## Install
 
 `duckgate` is a CLI tool, so an isolated install is recommended over a bare `pip install`:

@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Docs
+
+- Document that `COPY (query) TO 's3://...'` already works in `-q`/the shell — plain DuckDB
+  SQL, no dedicated duckgate feature needed; the connection already has S3 credentials wired
+  up. No code changed, only that this wasn't previously documented anywhere.
+
 ## [0.8.0] - 2026-09-22
 
 ### Breaking
