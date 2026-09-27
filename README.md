@@ -1,5 +1,11 @@
 # duckgate
 
+[![Tests](https://github.com/vinpereira/duckgate/actions/workflows/test.yml/badge.svg)](https://github.com/vinpereira/duckgate/actions/workflows/test.yml)
+[![Lint](https://github.com/vinpereira/duckgate/actions/workflows/lint.yml/badge.svg)](https://github.com/vinpereira/duckgate/actions/workflows/lint.yml)
+[![PyPI](https://img.shields.io/pypi/v/duckgate)](https://pypi.org/project/duckgate/)
+[![Python versions](https://img.shields.io/pypi/pyversions/duckgate)](https://pypi.org/project/duckgate/)
+[![License](https://img.shields.io/pypi/l/duckgate)](https://github.com/vinpereira/duckgate/blob/main/LICENSE)
+
 Interactive SQL shell over S3 data (Parquet, Iceberg, CSV, JSON) using DuckDB.
 
 At its core, `duckgate` queries S3 Parquet/Iceberg directly through DuckDB's `httpfs` —
