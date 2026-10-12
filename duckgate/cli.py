@@ -10,13 +10,14 @@ from duckgate.catalog import (
     run_query_with_timeout,
 )
 from duckgate.config import find_config, load_config
-from duckgate.engine import create_connection
+from duckgate.engine import S3Credentials, create_connection
 
 
 def _build_conn(config):
-    conn = create_connection(config)
+    credentials = S3Credentials(config.aws)
+    conn = create_connection(config, credentials)
     catalog = discover_catalog(config)
-    return conn, catalog
+    return conn, catalog, credentials
 
 
 @click.group(invoke_without_command=True)
@@ -63,7 +64,7 @@ def cli(ctx, query_str, output_format, limit_override, timeout_override, no_glue
     if no_glue:
         config = replace(config, glue=replace(config.glue, enabled=False))
 
-    conn, catalog = _build_conn(config)
+    conn, catalog, credentials = _build_conn(config)
     effective_limit = limit_override if limit_override is not None else config.query.default_limit
     effective_timeout = (
         timeout_override if timeout_override is not None else config.query.timeout_seconds
@@ -85,7 +86,7 @@ def cli(ctx, query_str, output_format, limit_override, timeout_override, no_glue
     else:
         from duckgate.shell import run_shell
 
-        run_shell(conn, catalog, effective_limit, effective_timeout)
+        run_shell(conn, catalog, effective_limit, effective_timeout, credentials)
 
 
 @cli.command()

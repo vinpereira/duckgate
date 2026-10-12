@@ -79,7 +79,7 @@ def test_apply_default_limit_disabled_prints_plain_warning(capsys):
 
 def test_apply_default_limit_wraps_select(capsys):
     sql = apply_default_limit("SELECT * FROM t", default_limit=100)
-    assert sql == "SELECT * FROM (SELECT * FROM t) LIMIT 100"
+    assert sql == "SELECT * FROM (SELECT * FROM t\n) LIMIT 100"
     err = capsys.readouterr().err
     assert "Note: no LIMIT" in err
     assert "100" in err
@@ -87,12 +87,17 @@ def test_apply_default_limit_wraps_select(capsys):
 
 def test_apply_default_limit_wraps_with_cte():
     sql = apply_default_limit("WITH x AS (SELECT 1) SELECT * FROM x", default_limit=50)
-    assert sql == "SELECT * FROM (WITH x AS (SELECT 1) SELECT * FROM x) LIMIT 50"
+    assert sql == "SELECT * FROM (WITH x AS (SELECT 1) SELECT * FROM x\n) LIMIT 50"
 
 
 def test_apply_default_limit_strips_trailing_semicolon():
     sql = apply_default_limit("SELECT * FROM t;", default_limit=100)
-    assert sql == "SELECT * FROM (SELECT * FROM t) LIMIT 100"
+    assert sql == "SELECT * FROM (SELECT * FROM t\n) LIMIT 100"
+
+
+def test_apply_default_limit_survives_trailing_line_comment():
+    sql = apply_default_limit("SELECT 1 AS x\n-- trailing note\n;", default_limit=100)
+    assert duckdb.sql(sql).fetchall() == [(1,)]
 
 
 def test_apply_default_limit_skips_non_select_statements(capsys):

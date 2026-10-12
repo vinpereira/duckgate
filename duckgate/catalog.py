@@ -122,7 +122,8 @@ def apply_default_limit(sql: str, default_limit: int) -> str:
         "(doesn't reduce scan time for aggregates). Use --limit 0 to disable.",
         err=True,
     )
-    return f"SELECT * FROM ({stripped}) LIMIT {default_limit}"
+    # the newline before ")" keeps a trailing "-- comment" from swallowing the wrapper
+    return f"SELECT * FROM ({stripped}\n) LIMIT {default_limit}"
 
 
 def _try_register(conn: duckdb.DuckDBPyConnection, name: str, path: str, fmt: str) -> bool:

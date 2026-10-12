@@ -6,11 +6,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- The interactive shell now runs a statement only when it ends with `;` — Enter without one
+  starts a new line, so multi-line queries can be typed or pasted. Meta-commands (`\limit`,
+  `\tables`, ...) and `exit`/`quit`/`\q` still run on Enter. Ctrl+C now discards the current
+  input instead of exiting; Ctrl+D or `\q` exits.
+
+### Added
+
+- `\tables` and `\d <table>` in the interactive shell.
+- Tab completion of table names in the shell; hyphenated names are inserted already quoted.
+- Persistent shell history in `~/.duckgate/history`.
+
+### Fixed
+
+- Long-running shell sessions no longer lose S3 access when SSO/assumed-role credentials
+  expire (typically after 1h): credentials are re-checked before every shell query and the
+  DuckDB S3 secret is re-created whenever boto3 has refreshed them.
+- A query whose last line ends with a `-- comment` no longer breaks when the default row
+  limit wraps it.
+
 ### Docs
 
 - Document that `COPY (query) TO 's3://...'` already works in `-q`/the shell — plain DuckDB
   SQL, no dedicated duckgate feature needed; the connection already has S3 credentials wired
   up. No code changed, only that this wasn't previously documented anywhere.
+- Remove references to internal planning docs, which aren't part of the repository, from the
+  CHANGELOG and code comments.
 
 ## [0.8.0] - 2026-09-22
 
@@ -21,9 +44,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Glue tables — add `enabled = true` to keep the previous behavior. Motivation: Glue
   discovery alone measured ~1.5–1.9s against a real 4-database config, roughly doubling wall
   time for a direct S3 query that never touches the catalog (this project's own README-
-  highlighted "querying S3 without any config" use case) — see
-  `docs/duckgate-vs-athena-performance.md` and
-  `docs/superpowers/specs/2026-09-22-glue-optout-and-iceberg-version-hint-design.md`.
+  highlighted "querying S3 without any config" use case).
 
 ### Added
 

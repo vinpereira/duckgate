@@ -95,6 +95,16 @@ duckgate -q "SELECT COUNT(*) FROM my_table"  # one-shot query
 `duckgate.toml` for a per-project override). Pass `-p`/`--path` to skip the prompt entirely —
 handy in scripts: `duckgate init --path duckgate.toml`.
 
+### Interactive shell
+
+- End a statement with `;` to run it — Enter without one starts a new line, so multi-line
+  queries can be typed or pasted as-is. Esc+Enter forces a submit; Ctrl+C discards the
+  current input; Ctrl+D or `\q` exits.
+- `\tables` lists available tables; `\d <table>` shows a table's schema.
+- Tab completes table names (hyphenated names are inserted already quoted).
+- History persists across sessions in `~/.duckgate/history`.
+- `\limit N`/`\nolimit` and `\timeout N`/`\notimeout` — see [Query safety](#query-safety).
+
 ## Configuration
 
 `duckgate.toml` in the current directory, falling back to `~/.duckgate/config.toml`:
@@ -159,7 +169,10 @@ disabled), `--timeout N`, or the shell's `\timeout N`/`\notimeout`. Unlike the r
 ## AWS credentials
 
 Uses the AWS profile from `[aws] profile`, resolved via `boto3.Session(profile_name=...)`.
-Works with `aws sso login` and static credentials directly. Tools that only export temporary
+Works with `aws sso login` and static credentials directly. Expiring credentials (SSO,
+assumed roles) are refreshed automatically before each shell query, so a long-running shell
+keeps working past the usual 1h credential lifetime — until the SSO session itself expires,
+at which point queries fail with an error until you run `aws sso login` again. Tools that only export temporary
 credentials into your shell's environment (e.g. Granted `assume`) are **not** picked up,
 since a named profile lookup ignores ambient environment variables — configure the profile's
 `credential_process` if you want a tool like that to work transparently.
