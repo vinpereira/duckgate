@@ -9,6 +9,15 @@ from moto.server import ThreadedMotoServer
 from duckgate.config import AwsConfig, Config
 
 
+@pytest.fixture(autouse=True)
+def isolated_glue_cache(tmp_path, monkeypatch):
+    # never read or write the real ~/.duckgate/cache, and never share a cache
+    # between tests (they reuse the same profile/region/database names)
+    cache_dir = tmp_path / "glue-cache"
+    monkeypatch.setattr("duckgate.catalog.CACHE_DIR", cache_dir)
+    return cache_dir
+
+
 @pytest.fixture
 def duck_conn():
     conn = duckdb.connect(":memory:")

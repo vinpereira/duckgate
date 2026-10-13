@@ -86,3 +86,15 @@ def test_load_config_custom_query_timeout(tmp_path):
     toml.write_text('[aws]\nprofile = "p"\nregion = "r"\n[query]\ntimeout_seconds = 30\n')
     config = load_config(toml)
     assert config.query.timeout_seconds == 30
+
+
+def test_glue_cache_ttl_defaults_to_one_hour(tmp_path):
+    path = tmp_path / "duckgate.toml"
+    path.write_text('[aws]\nprofile = "p"\n')
+    assert load_config(path).glue.cache_ttl_seconds == 3600
+
+
+def test_glue_cache_ttl_from_config(tmp_path):
+    path = tmp_path / "duckgate.toml"
+    path.write_text('[aws]\nprofile = "p"\n[glue]\nenabled = true\ncache_ttl_seconds = 0\n')
+    assert load_config(path).glue.cache_ttl_seconds == 0

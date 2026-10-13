@@ -1,33 +1,39 @@
+import sys
 from dataclasses import replace
 from pathlib import Path
 
 import click
 
-from duckgate.catalog import (
-    apply_default_limit,
-    describe_table,
-    discover_catalog,
-    run_query_with_timeout,
-)
+from duckgate.catalog import describe_table, discover_catalog, glue_cache_age, run_script
 from duckgate.config import find_config, load_config
 from duckgate.engine import S3Credentials, create_connection
 
+_REFRESH_HELP = "Re-discover Glue tables instead of using the cached catalog"
 
-def _build_conn(config):
+
+def _build_conn(config, refresh=False):
     credentials = S3Credentials(config.aws)
     conn = create_connection(config, credentials)
-    catalog = discover_catalog(config)
+    catalog = discover_catalog(config, refresh=refresh)
     return conn, catalog, credentials
 
 
 @click.group(invoke_without_command=True)
 @click.option("-q", "--query", "query_str", default=None, help="Run a SQL query and exit")
 @click.option(
+    "-f",
+    "--file",
+    "sql_file",
+    type=click.File("r"),
+    default=None,
+    help="Run the SQL statements in a file and exit (- reads stdin)",
+)
+@click.option(
     "--format",
     "output_format",
     type=click.Choice(["table", "csv", "json"]),
     default="table",
-    help="Output format for -q (default: table)",
+    help="Output format for -q/-f (default: table)",
 )
 @click.option(
     "--limit",
@@ -50,11 +56,22 @@ def _build_conn(config):
     default=False,
     help="Skip Glue catalog discovery for this run (only local [[sources]] are available)",
 )
+@click.option("--refresh", is_flag=True, default=False, help=_REFRESH_HELP)
 @click.pass_context
-def cli(ctx, query_str, output_format, limit_override, timeout_override, no_glue):
+def cli(
+    ctx, query_str, sql_file, output_format, limit_override, timeout_override, no_glue, refresh
+):
     """Interactive SQL shell over S3 data using DuckDB."""
     if ctx.invoked_subcommand is not None:
         return
+    if query_str is not None and sql_file is not None:
+        raise click.UsageError("use either -q or -f, not both")
+    if sql_file is not None:
+        query_str = sql_file.read()
+    elif query_str is None and not sys.stdin.isatty():
+        # piped input (`duckgate < query.sql`, `echo ... | duckgate`) runs as a script
+        query_str = sys.stdin.read()
+
     try:
         config = load_config(find_config())
     except FileNotFoundError as e:
@@ -64,16 +81,17 @@ def cli(ctx, query_str, output_format, limit_override, timeout_override, no_glue
     if no_glue:
         config = replace(config, glue=replace(config.glue, enabled=False))
 
-    conn, catalog, credentials = _build_conn(config)
+    conn, catalog, credentials = _build_conn(config, refresh)
     effective_limit = limit_override if limit_override is not None else config.query.default_limit
     effective_timeout = (
         timeout_override if timeout_override is not None else config.query.timeout_seconds
     )
 
-    if query_str:
+    if query_str is not None:
         try:
-            sql = apply_default_limit(query_str, effective_limit)
-            df = run_query_with_timeout(conn, catalog, sql, set(), effective_timeout).fetchdf()
+            df = run_script(
+                conn, catalog, query_str, set(), effective_timeout, effective_limit
+            ).fetchdf()
             if output_format == "csv":
                 click.echo(df.to_csv(index=False), nl=False)
             elif output_format == "json":
@@ -90,7 +108,8 @@ def cli(ctx, query_str, output_format, limit_override, timeout_override, no_glue
 
 
 @cli.command()
-def tables():
+@click.option("--refresh", is_flag=True, default=False, help=_REFRESH_HELP)
+def tables(refresh):
     """List available tables."""
     try:
         config = load_config(find_config())
@@ -98,14 +117,21 @@ def tables():
         click.echo(str(e), err=True)
         raise SystemExit(1) from e
 
-    catalog = discover_catalog(config)
+    cache_age = glue_cache_age(config) if config.glue.enabled and not refresh else None
+    catalog = discover_catalog(config, refresh=refresh)
     for name in sorted(catalog):
         click.echo(name)
+    if cache_age is not None:
+        click.echo(
+            f"(Glue tables cached {_format_age(cache_age)} ago — use --refresh to re-discover)",
+            err=True,
+        )
 
 
 @cli.command()
 @click.argument("name")
-def describe(name):
+@click.option("--refresh", is_flag=True, default=False, help=_REFRESH_HELP)
+def describe(name, refresh):
     """Show a table's schema without registering it."""
     try:
         config = load_config(find_config())
@@ -113,10 +139,11 @@ def describe(name):
         click.echo(str(e), err=True)
         raise SystemExit(1) from e
 
-    catalog = discover_catalog(config)
+    catalog = discover_catalog(config, refresh=refresh)
     if name not in catalog:
         click.echo(
-            f"Table '{name}' not found. Run `duckgate tables` to see what's available.",
+            f"Table '{name}' not found. Run `duckgate tables` to see what's available"
+            + (" (add --refresh if it was created recently)." if config.glue.enabled else "."),
             err=True,
         )
         raise SystemExit(1)
@@ -128,6 +155,14 @@ def describe(name):
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
         raise SystemExit(1) from e
+
+
+def _format_age(seconds: float) -> str:
+    if seconds < 60:
+        return f"{int(seconds)}s"
+    if seconds < 3600:
+        return f"{int(seconds // 60)}m"
+    return f"{int(seconds // 3600)}h"
 
 
 @cli.command("init")
@@ -159,6 +194,7 @@ def init_cmd(path_str):
         "[glue]\n"
         "enabled   = true\n"
         "databases = []  # empty = all databases\n"
+        "# cache_ttl_seconds = 3600  # reuse discovered Glue tables for 1h; 0 disables the cache\n"
         "\n"
         "# [[sources]] name a piece of S3 data you want to query as `name`.\n"
         "# - If it matches a Glue table name, it overrides that table (e.g. to\n"

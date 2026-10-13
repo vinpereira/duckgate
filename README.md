@@ -89,7 +89,14 @@ duckgate tables        # list available tables
 duckgate describe my_table                   # show a table's schema, no registration
 duckgate               # open interactive shell
 duckgate -q "SELECT COUNT(*) FROM my_table"  # one-shot query
+duckgate -f report.sql                       # run a SQL file
+duckgate < report.sql                        # ...or pipe it in (same as -f -)
 ```
+
+`-q`, `-f` and piped input all accept several `;`-separated statements: setup statements
+(`SET`, `CREATE TEMP TABLE`, `COPY`, ...) run first, and only the last statement's result is
+printed (in `--format table|csv|json`). The default row limit and `--timeout` apply to each
+statement on its own — the limit only to the last one.
 
 `duckgate init` accepts Enter to take the suggested default, or a path you type (e.g. a local
 `duckgate.toml` for a per-project override). Pass `-p`/`--path` to skip the prompt entirely —
@@ -115,8 +122,9 @@ profile = "my-aws-profile"
 region  = "eu-central-1"
 
 [glue]
-enabled   = true
-databases = []  # empty = all databases
+enabled           = true
+databases         = []    # empty = all databases
+cache_ttl_seconds = 3600  # reuse discovered tables for 1h (default); 0 disables the cache
 
 # [[sources]] name a piece of S3 data you want to query as `name`.
 # - If it matches a Glue table name, it overrides that table (e.g. to
@@ -142,6 +150,11 @@ explicitly (as in the example above) to also discover tables from Glue.
   to a specific environment prefix, or to name S3 data that isn't in Glue at all.
 - If two Glue tables from different databases share a name, they are registered as
   `database__table_name`.
+- **Discovered Glue tables are cached** in `~/.duckgate/cache/` for `[glue] cache_ttl_seconds`
+  (default 1h), per profile/region/database list — Glue discovery otherwise costs a second or
+  two on every run. Pass `--refresh` (`duckgate --refresh`, `duckgate tables --refresh`,
+  `duckgate describe <table> --refresh`) to re-discover now, e.g. right after a table was
+  added to Glue. `[[sources]]` are never cached; edits to them apply on the next run.
 - `duckgate tables` lists what the catalog *discovers* (what Glue/your `[[sources]]`
   advertise), not just tables that are actually queryable. A table with no matching files or
   bad permissions will still show up in the list and only fails when you query it.

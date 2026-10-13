@@ -6,6 +6,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Local cache of discovered Glue tables in `~/.duckgate/cache/`, keyed by profile, region and
+  database list. Glue discovery costs ~1.5–1.9s per run against a real 4-database config; a
+  cache hit skips it entirely. `[glue] cache_ttl_seconds` (default `3600`, `0` disables it)
+  sets how long a cached catalog is reused.
+- `--refresh` on `duckgate`, `duckgate tables` and `duckgate describe` to re-discover Glue
+  tables instead of using the cache. `duckgate tables` notes on stderr when its list came
+  from the cache.
+- `-f FILE` to run the SQL in a file (`-f -` reads stdin), and piped stdin
+  (`duckgate < report.sql`) runs the same way.
+- `-q`, `-f`, piped input and the shell all run several `;`-separated statements: earlier
+  ones run as-is, the last one's result is printed and gets the default row limit.
+
+### Changed
+
+- Minimum DuckDB version is now 1.3.0 (was declared as 1.0.0). Parameterized
+  `CREATE SECRET`, used since 0.5.0, doesn't parse before 1.3.0 — every duckgate release since
+  then was already broken on older DuckDB versions despite the declared range. CI now also
+  runs the test suite against DuckDB 1.3.0 to keep the floor honest.
+
+### Fixed
+
+- The default row limit now applies to a `SELECT`/`WITH` that starts with a comment
+  (`-- ...` or `/* ... */`); such queries previously skipped it with a "no LIMIT" warning.
+
 ## [0.9.0] - 2026-10-13
 
 ### Changed

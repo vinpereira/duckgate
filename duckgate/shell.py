@@ -8,7 +8,7 @@ from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.history import FileHistory, InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings
 
-from duckgate.catalog import apply_default_limit, describe_table, run_query_with_timeout
+from duckgate.catalog import describe_table, run_script
 
 HISTORY_PATH = Path.home() / ".duckgate" / "history"
 
@@ -126,8 +126,7 @@ class Shell:
     def _query(self, text: str) -> None:
         try:
             self._apply_credentials()
-            sql = apply_default_limit(text, self.limit)
-            df = _execute(self.conn, self.catalog, self.registered, sql, self.timeout)
+            df = _execute(self.conn, self.catalog, self.registered, text, self.timeout, self.limit)
             click.echo("(0 rows)" if df.empty else df.to_string(index=False))
         except Exception as e:
             click.echo(f"Error: {e}", err=True)
@@ -182,15 +181,15 @@ def _make_history(path: Path):
     return FileHistory(str(path))
 
 
-def _execute(conn, catalog, registered, text, timeout):
+def _execute(conn, catalog, registered, text, timeout, limit):
     # prompt_toolkit's terminal handling can leave Ctrl+C unable to reach
     # DuckDB's own interrupt handling — wire it up explicitly for the
     # duration of the query so a long-running SELECT can actually be cancelled.
-    # The timeout timer (inside run_query_with_timeout) calls the same
+    # The timeout timer (inside run_script) calls the same
     # conn.interrupt(), just from a different trigger — whichever fires first wins,
     # the other is a harmless no-op.
     previous = signal.signal(signal.SIGINT, lambda *_: conn.interrupt())
     try:
-        return run_query_with_timeout(conn, catalog, text, registered, timeout).fetchdf()
+        return run_script(conn, catalog, text, registered, timeout, limit).fetchdf()
     finally:
         signal.signal(signal.SIGINT, previous)

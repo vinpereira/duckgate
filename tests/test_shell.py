@@ -52,6 +52,13 @@ def test_multiline_query_with_trailing_comment(shell, capsys):
     assert "3" in captured.out
 
 
+def test_multiple_statements_in_one_input(shell, capsys):
+    shell.handle("CREATE TEMP TABLE t AS SELECT 7 AS seven; SELECT * FROM t;")
+    captured = capsys.readouterr()
+    assert "Error" not in captured.err
+    assert "seven" in captured.out
+
+
 def test_query_against_hyphenated_table(shell, capsys):
     shell.handle('SELECT count(*) AS n FROM "my-db__people";')
     assert "3" in capsys.readouterr().out

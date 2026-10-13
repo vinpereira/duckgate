@@ -13,6 +13,7 @@ class AwsConfig:
 class GlueConfig:
     enabled: bool = False
     databases: list[str] = field(default_factory=list)
+    cache_ttl_seconds: int = 3600
 
 
 @dataclass
@@ -57,6 +58,7 @@ def load_config(path: Path) -> Config:
     glue = GlueConfig(
         enabled=glue_data.get("enabled", False),
         databases=glue_data.get("databases", []),
+        cache_ttl_seconds=glue_data.get("cache_ttl_seconds", 3600),
     )
     sources = [SourceConfig(**s) for s in data.get("sources", [])]
     query_data = data.get("query", {})

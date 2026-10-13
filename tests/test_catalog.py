@@ -1,3 +1,4 @@
+import time
 from unittest.mock import patch
 
 import boto3
@@ -15,8 +16,10 @@ from duckgate.catalog import (
     describe_table,
     discover_catalog,
     ensure_registered,
+    glue_cache_age,
     run_query,
     run_query_with_timeout,
+    run_script,
 )
 from duckgate.config import AwsConfig, Config, GlueConfig, SourceConfig
 
@@ -31,8 +34,8 @@ def test_make_view_sql_parquet():
 def test_make_view_sql_quotes_hyphenated_name():
     # Glue database/table names commonly contain hyphens, which DuckDB's
     # unquoted identifier syntax parses as the subtraction operator
-    sql = _make_view_sql("gate-nonprod-eu-db__my-table", "s3://bucket/prefix/*.parquet", "parquet")
-    assert '"gate-nonprod-eu-db__my-table"' in sql
+    sql = _make_view_sql("my-db__my-table", "s3://bucket/prefix/*.parquet", "parquet")
+    assert '"my-db__my-table"' in sql
 
 
 def test_make_view_sql_iceberg():
@@ -566,3 +569,144 @@ def _configure_duck_s3(duck_conn, moto_server):
     duck_conn.execute(f"SET s3_endpoint='{moto_server}'")
     duck_conn.execute("SET s3_use_ssl=false")
     duck_conn.execute("SET s3_url_style='path'")
+
+
+def test_apply_default_limit_wraps_select_after_leading_comment():
+    sql = apply_default_limit("-- recent rows only\n/* block */ SELECT * FROM range(10)", 3)
+    assert sql.endswith("LIMIT 3")
+    assert len(duckdb.sql(sql).fetchall()) == 3
+
+
+def test_run_script_returns_last_statement_result(duck_conn):
+    sql = "CREATE TEMP TABLE t AS SELECT 1 AS x; SELECT x FROM t;"
+    assert run_script(duck_conn, {}, sql, set(), 0, 100).fetchall() == [(1,)]
+
+
+def test_run_script_limits_only_the_last_statement(duck_conn):
+    sql = "CREATE TEMP TABLE t AS SELECT * FROM range(10) r(x);\n-- final\nSELECT * FROM t"
+    assert len(run_script(duck_conn, {}, sql, set(), 0, 3).fetchall()) == 3
+    assert duck_conn.execute("SELECT count(*) FROM t").fetchone()[0] == 10
+
+
+def test_run_script_handles_semicolons_in_strings(duck_conn):
+    assert run_script(duck_conn, {}, "SELECT 'a;b' AS s;", set(), 0, 100).fetchall() == [("a;b",)]
+
+
+def test_run_script_rejects_empty_input(duck_conn):
+    with pytest.raises(ValueError, match="no SQL statement"):
+        run_script(duck_conn, {}, "  -- just a comment\n", set(), 0, 100)
+
+
+# --- Glue catalog cache ---
+
+
+def _glue_config(ttl=3600, databases=("my_db",), profile="test", sources=()):
+    return Config(
+        aws=AwsConfig(profile=profile, region="eu-central-1"),
+        glue=GlueConfig(enabled=True, databases=list(databases), cache_ttl_seconds=ttl),
+        sources=list(sources),
+    )
+
+
+def _create_glue_table(name):
+    glue = boto3.client("glue", region_name="eu-central-1")
+    try:
+        glue.create_database(DatabaseInput={"Name": "my_db"})
+    except glue.exceptions.AlreadyExistsException:
+        pass
+    glue.create_table(DatabaseName="my_db", TableInput=_glue_table_input(name, f"s3://b/{name}/"))
+
+
+def _discover(config, **kwargs):
+    with patch("duckgate.catalog.boto3.Session", return_value=boto3.Session()):
+        return discover_catalog(config, **kwargs)
+
+
+def _discover_without_glue_access(config, **kwargs):
+    with patch("duckgate.catalog.boto3.Session", side_effect=AssertionError("Glue was called")):
+        return discover_catalog(config, **kwargs)
+
+
+@mock_aws
+def test_glue_catalog_served_from_cache():
+    _create_glue_table("locations")
+    first = _discover(_glue_config())
+    assert _discover_without_glue_access(_glue_config()) == first
+
+
+@mock_aws
+def test_refresh_bypasses_and_rewrites_cache():
+    _create_glue_table("locations")
+    _discover(_glue_config())
+    _create_glue_table("trips")
+    assert "trips" in _discover(_glue_config(), refresh=True)
+    assert "trips" in _discover_without_glue_access(_glue_config())
+
+
+@mock_aws
+def test_cache_expires_after_ttl():
+    _create_glue_table("locations")
+    _discover(_glue_config(ttl=60))
+    _create_glue_table("trips")
+    later = time.time() + 61
+    with patch("duckgate.catalog.time.time", return_value=later):
+        assert "trips" in _discover(_glue_config(ttl=60))
+
+
+@mock_aws
+def test_cache_ttl_zero_disables_cache(isolated_glue_cache):
+    _create_glue_table("locations")
+    _discover(_glue_config(ttl=0))
+    assert not isolated_glue_cache.exists() or not any(isolated_glue_cache.iterdir())
+    _create_glue_table("trips")
+    assert "trips" in _discover(_glue_config(ttl=0))
+
+
+@mock_aws
+def test_cache_is_keyed_by_profile_and_databases():
+    _create_glue_table("locations")
+    _discover(_glue_config())
+    with pytest.raises(AssertionError, match="Glue was called"):
+        _discover_without_glue_access(_glue_config(profile="other"))
+    with pytest.raises(AssertionError, match="Glue was called"):
+        _discover_without_glue_access(_glue_config(databases=("my_db", "other_db")))
+
+
+@mock_aws
+def test_corrupt_cache_is_ignored(isolated_glue_cache):
+    _create_glue_table("locations")
+    _discover(_glue_config())
+    for cache_file in isolated_glue_cache.iterdir():
+        cache_file.write_text("{not json")
+    assert "locations" in _discover(_glue_config())
+
+
+@mock_aws
+def test_unwritable_cache_dir_still_discovers(tmp_path, monkeypatch):
+    blocker = tmp_path / "file"
+    blocker.write_text("not a directory")
+    monkeypatch.setattr("duckgate.catalog.CACHE_DIR", blocker / "cache")
+    _create_glue_table("locations")
+    assert "locations" in _discover(_glue_config())
+
+
+@mock_aws
+def test_local_sources_are_never_cached():
+    _create_glue_table("locations")
+    first = SourceConfig(name="mine", path="s3://one/*.parquet")
+    _discover(_glue_config(sources=[first]))
+    second = SourceConfig(name="mine", path="s3://two/*.parquet")
+    catalog = _discover_without_glue_access(_glue_config(sources=[second]))
+    assert catalog["mine"].path == "s3://two/*.parquet"
+
+
+@mock_aws
+def test_glue_cache_age():
+    config = _glue_config()
+    assert glue_cache_age(config) is None
+    _create_glue_table("locations")
+    _discover(config)
+    age = glue_cache_age(config)
+    assert age is not None and 0 <= age < 5
+    with patch("duckgate.catalog.time.time", return_value=time.time() + 3601):
+        assert glue_cache_age(config) is None

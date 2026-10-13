@@ -1,12 +1,19 @@
+import hashlib
+import json
+import os
 import re
 import threading
-from dataclasses import dataclass
+import time
+from dataclasses import asdict, dataclass
+from pathlib import Path
 
 import boto3
 import click
 import duckdb
 
 from duckgate.config import Config
+
+CACHE_DIR = Path.home() / ".duckgate" / "cache"
 
 
 @dataclass
@@ -15,16 +22,67 @@ class TableSpec:
     format: str
 
 
-def discover_catalog(config: Config) -> dict[str, TableSpec]:
+def discover_catalog(config: Config, refresh: bool = False) -> dict[str, TableSpec]:
     catalog: dict[str, TableSpec] = {}
+    if config.glue.enabled:
+        catalog.update(_cached_glue_tables(config, refresh))
+    # local sources override Glue tables with the same name, and are never cached —
+    # editing [[sources]] takes effect on the next run
     for source in config.sources:
         catalog[source.name] = TableSpec(path=source.path, format=source.format)
-    if config.glue.enabled:
-        _discover_glue(config, catalog)
     return catalog
 
 
-def _discover_glue(config: Config, catalog: dict[str, TableSpec]) -> None:
+def glue_cache_age(config: Config) -> float | None:
+    """Seconds since the cached Glue catalog was written, or None if there's no valid one."""
+    entry = _read_glue_cache(config)
+    return None if entry is None else time.time() - entry[0]
+
+
+def _cached_glue_tables(config: Config, refresh: bool) -> dict[str, TableSpec]:
+    # Glue discovery costs ~1.5-1.9s per run against a real multi-database config,
+    # paid on every -q invocation — cache it per profile/region/databases
+    if config.glue.cache_ttl_seconds > 0 and not refresh:
+        entry = _read_glue_cache(config)
+        if entry is not None:
+            return entry[1]
+    tables = _discover_glue(config)
+    if config.glue.cache_ttl_seconds > 0:
+        _write_glue_cache(config, tables)
+    return tables
+
+
+def _glue_cache_path(config: Config) -> Path:
+    key = json.dumps([config.aws.profile, config.aws.region, sorted(config.glue.databases)])
+    return CACHE_DIR / f"glue-{hashlib.sha256(key.encode()).hexdigest()[:16]}.json"
+
+
+def _read_glue_cache(config: Config) -> tuple[float, dict[str, TableSpec]] | None:
+    try:
+        data = json.loads(_glue_cache_path(config).read_text())
+        created_at = float(data["created_at"])
+        tables = {name: TableSpec(**spec) for name, spec in data["tables"].items()}
+    except (OSError, ValueError, KeyError, TypeError):
+        return None  # missing or unreadable cache is just a miss
+    if not 0 <= time.time() - created_at <= config.glue.cache_ttl_seconds:
+        return None
+    return created_at, tables
+
+
+def _write_glue_cache(config: Config, tables: dict[str, TableSpec]) -> None:
+    path = _glue_cache_path(config)
+    data = {"created_at": time.time(), "tables": {n: asdict(t) for n, t in tables.items()}}
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data))
+        os.replace(tmp, path)  # atomic, so a concurrent run never reads a half-written file
+    except OSError:
+        pass  # caching is best-effort; discovery already succeeded
+
+
+def _discover_glue(config: Config) -> dict[str, TableSpec]:
+    tables: dict[str, TableSpec] = {}
     session = boto3.Session(profile_name=config.aws.profile)
     glue = session.client("glue", region_name=config.aws.region)
 
@@ -44,9 +102,8 @@ def _discover_glue(config: Config, catalog: dict[str, TableSpec]) -> None:
         if not loc:
             continue
         view_name = f"{db}__{name}" if len(name_dbs[name]) > 1 else name
-        if view_name in catalog:
-            continue
-        catalog[view_name] = TableSpec(path=loc, format=fmt)
+        tables[view_name] = TableSpec(path=loc, format=fmt)
+    return tables
 
 
 def ensure_registered(
@@ -107,6 +164,33 @@ def run_query_with_timeout(
         timer.cancel()
 
 
+# "-- line" and "/* block */" comments (plus whitespace) before a statement's first keyword
+_LEADING_COMMENTS = re.compile(r"\A(?:\s+|--[^\n]*(?:\n|\Z)|/\*.*?\*/)*", re.DOTALL)
+
+
+def run_script(
+    conn: duckdb.DuckDBPyConnection,
+    catalog: dict[str, TableSpec],
+    sql: str,
+    registered: set[str],
+    timeout_seconds: int,
+    default_limit: int,
+) -> duckdb.DuckDBPyRelation:
+    """Run every statement in sql and return the last one's result.
+
+    Earlier statements (SET, CREATE TEMP TABLE, COPY, ...) run as-is; the default row
+    limit only applies to the last one, whose result is what gets printed. The timeout
+    applies to each statement separately.
+    """
+    statements = [s.query for s in duckdb.extract_statements(sql)]
+    if not statements:
+        raise ValueError("no SQL statement to run")
+    for statement in statements[:-1]:
+        run_query_with_timeout(conn, catalog, statement, registered, timeout_seconds)
+    last = apply_default_limit(statements[-1], default_limit)
+    return run_query_with_timeout(conn, catalog, last, registered, timeout_seconds)
+
+
 def apply_default_limit(sql: str, default_limit: int) -> str:
     if re.search(r"\blimit\b", sql, re.IGNORECASE):
         return sql
@@ -114,7 +198,7 @@ def apply_default_limit(sql: str, default_limit: int) -> str:
         click.echo("Warning: no LIMIT — this query may scan a lot of data.", err=True)
         return sql
     stripped = sql.strip().rstrip(";").strip()
-    if not re.match(r"(?is)^(select|with)\b", stripped):
+    if not re.match(r"(?is)^(select|with)\b", _LEADING_COMMENTS.sub("", stripped)):
         click.echo("Warning: no LIMIT — this query may scan a lot of data.", err=True)
         return sql
     click.echo(

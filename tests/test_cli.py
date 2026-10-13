@@ -186,3 +186,81 @@ def test_no_glue_flag_skips_glue_discovery(runner, tmp_path, monkeypatch):
     assert "42" in result.output
     # only _discover_glue ever calls session.client("glue", ...) — create_connection doesn't
     mock.client.assert_not_called()
+
+
+def test_one_shot_query_runs_multiple_statements(runner, config_toml):
+    with patch(ENGINE_SESSION, return_value=_mock_session_no_glue()):
+        result = runner.invoke(
+            cli, ["-q", "CREATE TEMP TABLE t AS SELECT 7 AS seven; SELECT * FROM t"]
+        )
+    assert result.exit_code == 0, result.output
+    assert "seven" in result.output and "7" in result.output
+
+
+def test_file_option_runs_sql_file(runner, config_toml):
+    script = config_toml / "query.sql"
+    script.write_text("-- setup\nCREATE TEMP TABLE t AS SELECT 42 AS answer;\n\nSELECT * FROM t;\n")
+    with patch(ENGINE_SESSION, return_value=_mock_session_no_glue()):
+        result = runner.invoke(cli, ["-f", str(script)])
+    assert result.exit_code == 0, result.output
+    assert "42" in result.output
+
+
+def test_file_option_dash_reads_stdin(runner, config_toml):
+    with patch(ENGINE_SESSION, return_value=_mock_session_no_glue()):
+        result = runner.invoke(cli, ["-f", "-", "--format", "csv"], input="SELECT 42 AS answer;")
+    assert result.exit_code == 0, result.output
+    assert "answer\n42" in result.output
+
+
+def test_piped_stdin_runs_as_query(runner, config_toml):
+    with patch(ENGINE_SESSION, return_value=_mock_session_no_glue()):
+        result = runner.invoke(cli, ["--format", "json"], input="SELECT 42 AS answer;")
+    assert result.exit_code == 0, result.output
+    assert '"answer":42' in result.output
+
+
+def test_query_and_file_are_mutually_exclusive(runner, config_toml):
+    script = config_toml / "query.sql"
+    script.write_text("SELECT 1;")
+    result = runner.invoke(cli, ["-q", "SELECT 1", "-f", str(script)])
+    assert result.exit_code != 0
+    assert "either -q or -f" in result.output
+
+
+def test_empty_script_is_an_error(runner, config_toml):
+    with patch(ENGINE_SESSION, return_value=_mock_session_no_glue()):
+        result = runner.invoke(cli, ["-f", "-"], input="-- nothing to run\n")
+    assert result.exit_code == 1
+    assert "no SQL statement" in result.output
+
+
+def test_refresh_flag_is_passed_to_discovery(runner, config_toml):
+    with (
+        patch(ENGINE_SESSION, return_value=_mock_session_no_glue()),
+        patch("duckgate.cli.discover_catalog", return_value={}) as discover,
+    ):
+        result = runner.invoke(cli, ["--refresh", "-q", "SELECT 1"])
+    assert result.exit_code == 0, result.output
+    assert discover.call_args.kwargs["refresh"] is True
+
+
+@pytest.mark.parametrize("command", [["tables", "--refresh"], ["describe", "x", "--refresh"]])
+def test_subcommands_accept_refresh(runner, config_toml, command):
+    with patch("duckgate.cli.discover_catalog", return_value={}) as discover:
+        runner.invoke(cli, command)
+    assert discover.call_args.kwargs["refresh"] is True
+
+
+def test_tables_notes_when_served_from_cache(runner, config_toml):
+    (config_toml / "duckgate.toml").write_text(
+        '[aws]\nprofile = "test"\nregion = "eu-central-1"\n[glue]\nenabled = true\n'
+    )
+    with (
+        patch("duckgate.cli.discover_catalog", return_value={"t": None}),
+        patch("duckgate.cli.glue_cache_age", return_value=720),
+    ):
+        result = runner.invoke(cli, ["tables"])
+    assert result.exit_code == 0
+    assert "cached 12m ago" in result.output
+    assert "--refresh" in result.output
