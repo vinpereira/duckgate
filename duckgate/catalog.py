@@ -14,6 +14,9 @@ import duckdb
 from duckgate.config import Config
 
 CACHE_DIR = Path.home() / ".duckgate" / "cache"
+# bump whenever discovery would produce different TableSpecs for the same Glue tables,
+# so caches written by older versions are ignored instead of served for up to a TTL
+_CACHE_VERSION = 2
 
 
 @dataclass
@@ -53,7 +56,9 @@ def _cached_glue_tables(config: Config, refresh: bool) -> dict[str, TableSpec]:
 
 
 def _glue_cache_path(config: Config) -> Path:
-    key = json.dumps([config.aws.profile, config.aws.region, sorted(config.glue.databases)])
+    key = json.dumps(
+        [_CACHE_VERSION, config.aws.profile, config.aws.region, sorted(config.glue.databases)]
+    )
     return CACHE_DIR / f"glue-{hashlib.sha256(key.encode()).hexdigest()[:16]}.json"
 
 
@@ -94,8 +99,12 @@ def _discover_glue(config: Config) -> dict[str, TableSpec]:
         pager = glue.get_paginator("get_tables")
         for page in pager.paginate(DatabaseName=db):
             for t in page["TableList"]:
+                fmt = _detect_format(t)
                 loc = t.get("StorageDescriptor", {}).get("Location", "")
-                rows.append((db, t["Name"], loc, _detect_format(t)))
+                if fmt == "iceberg":
+                    # the exact current snapshot, no version-hint.text or guessing needed
+                    loc = t.get("Parameters", {}).get("metadata_location") or loc
+                rows.append((db, t["Name"], loc, fmt))
                 name_dbs.setdefault(t["Name"], []).append(db)
 
     for db, name, loc, fmt in rows:
@@ -256,7 +265,12 @@ def _with_glob(path: str, format: str) -> str:
 
 
 def _detect_format(table: dict) -> str:
+    # Glue reports Iceberg tables as TableType EXTERNAL_TABLE with Parameters.table_type
+    # ICEBERG; misreading them as Parquet globs every data file ever written, including
+    # ones no longer in the current snapshot — stale and duplicated rows
     if table.get("TableType") == "ICEBERG":
+        return "iceberg"
+    if table.get("Parameters", {}).get("table_type", "").upper() == "ICEBERG":
         return "iceberg"
     storage = table.get("StorageDescriptor", {})
     serde_lib = storage.get("SerdeInfo", {}).get("SerializationLibrary", "")

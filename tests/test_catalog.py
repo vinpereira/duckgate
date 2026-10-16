@@ -710,3 +710,58 @@ def test_glue_cache_age():
     assert age is not None and 0 <= age < 5
     with patch("duckgate.catalog.time.time", return_value=time.time() + 3601):
         assert glue_cache_age(config) is None
+
+
+# --- Glue Iceberg tables as Glue actually reports them ---
+
+
+@pytest.mark.parametrize("marker", ["ICEBERG", "iceberg"])
+def test_detect_format_iceberg_from_table_type_parameter(marker):
+    # Glue reports Iceberg tables as TableType EXTERNAL_TABLE + Parameters.table_type
+    table = {"TableType": "EXTERNAL_TABLE", "Parameters": {"table_type": marker}}
+    assert _detect_format(table) == "iceberg"
+
+
+def _glue_iceberg_table_input(name, location, metadata_location=None):
+    params = {"table_type": "ICEBERG"}
+    if metadata_location:
+        params["metadata_location"] = metadata_location
+    return {
+        "Name": name,
+        "StorageDescriptor": {"Location": location, "Columns": []},
+        "TableType": "EXTERNAL_TABLE",
+        "Parameters": params,
+    }
+
+
+@mock_aws
+def test_glue_iceberg_table_reads_current_metadata_file():
+    glue = boto3.client("glue", region_name="eu-central-1")
+    glue.create_database(DatabaseInput={"Name": "my_db"})
+    metadata = "s3://b/events/metadata/00042-abc.metadata.json"
+    glue.create_table(
+        DatabaseName="my_db",
+        TableInput=_glue_iceberg_table_input("events", "s3://b/events", metadata),
+    )
+    catalog = _discover(_glue_config(ttl=0))
+    assert catalog["events"] == TableSpec(path=metadata, format="iceberg")
+
+
+@mock_aws
+def test_glue_iceberg_table_without_metadata_location_uses_table_location():
+    glue = boto3.client("glue", region_name="eu-central-1")
+    glue.create_database(DatabaseInput={"Name": "my_db"})
+    glue.create_table(
+        DatabaseName="my_db", TableInput=_glue_iceberg_table_input("events", "s3://b/events")
+    )
+    catalog = _discover(_glue_config(ttl=0))
+    assert catalog["events"] == TableSpec(path="s3://b/events", format="iceberg")
+
+
+@mock_aws
+def test_cache_from_an_older_format_version_is_ignored(monkeypatch):
+    _create_glue_table("locations")
+    _discover(_glue_config())
+    monkeypatch.setattr("duckgate.catalog._CACHE_VERSION", 999)
+    with pytest.raises(AssertionError, match="Glue was called"):
+        _discover_without_glue_access(_glue_config())

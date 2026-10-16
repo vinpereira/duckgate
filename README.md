@@ -145,7 +145,8 @@ explicitly (as in the example above) to also discover tables from Glue.
 
 - **Glue tables** are discovered automatically from the configured databases, once `[glue]
   enabled = true` is set. A bare Glue table location (no wildcard) is read as
-  `location/**/*.<format>`.
+  `location/**/*.<format>`. Iceberg tables are read from the catalog's current
+  `metadata_location`, so you always get the table's current snapshot.
 - **Local `[[sources]]`** entries override Glue tables with the same name — use this to point
   to a specific environment prefix, or to name S3 data that isn't in Glue at all.
 - If two Glue tables from different databases share a name, they are registered as
@@ -201,6 +202,10 @@ since a named profile lookup ignores ambient environment variables — configure
 
 The `spatial` extension is loaded on every connection — `ST_*` functions (`ST_Point`,
 `ST_AsText`, etc.) work directly on position/GPS columns with no extra setup.
+
+## Roadmap
+
+Planned and considered work is in [ROADMAP.md](ROADMAP.md).
 
 ## Development
 

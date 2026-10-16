@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-10-16
+
+### Fixed
+
+- **Iceberg tables discovered from Glue were read as plain Parquet**, returning wrong
+  results. Glue marks Iceberg tables with `Parameters.table_type = ICEBERG` (`TableType` is
+  `EXTERNAL_TABLE`), which detection missed — so the table was read with
+  `read_parquet('<location>/**/*.parquet')`, picking up every data file ever written under
+  the location, including files no longer in the current snapshot (stale and duplicated rows;
+  on one real table, ~18x more files than the live table has). Glue Iceberg tables are now
+  read with `iceberg_scan()` on the table's `metadata_location` — the exact current snapshot,
+  so they also no longer depend on `version-hint.text` or version guessing.
+- Glue catalog caches written by 0.10.0 are ignored and rebuilt, since they recorded these
+  tables as Parquet.
+
+### Docs
+
+- Add a public `ROADMAP.md`, linked from the README.
+
 ## [0.10.0] - 2026-10-13
 
 ### Added
