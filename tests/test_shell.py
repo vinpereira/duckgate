@@ -262,3 +262,103 @@ def test_enter_without_semicolon_continues_the_query():
 
 def test_enter_submits_meta_command_immediately():
     assert _prompt("\\tables\r") == "\\tables"
+
+
+# --- Athena hint ---
+
+
+def test_slow_query_prints_hint(catalog, capsys, monkeypatch):
+    catalog["people"] = TableSpec(
+        path=catalog["people"].path, format="parquet", glue_table='"db"."people"'
+    )
+    conn = duckdb.connect(":memory:")
+    shell = Shell(conn, catalog, default_limit=100, default_timeout=0, slow_hint_seconds=60)
+    monkeypatch.setattr("duckgate.shell.time.monotonic", MagicMock(side_effect=[0.0, 95.0]))
+    shell.handle("SELECT count(*) FROM people;")
+    captured = capsys.readouterr()
+    assert "Hint: this query took 95s." in captured.err
+    assert '"db"."people"' in captured.err
+    conn.close()
+
+
+def test_fast_query_prints_no_hint(catalog, capsys):
+    conn = duckdb.connect(":memory:")
+    shell = Shell(conn, catalog, default_limit=100, default_timeout=0, slow_hint_seconds=60)
+    shell.handle("SELECT count(*) FROM people;")
+    assert "Hint" not in capsys.readouterr().err
+    conn.close()
+
+
+# --- \\refresh ---
+
+
+def _write_people(directory, rows):
+    directory.mkdir(exist_ok=True)
+    values = ", ".join(f"({i}, '{n}')" for i, n in rows)
+    duckdb.sql(
+        f"COPY (SELECT * FROM (VALUES {values}) t(id, name)) "
+        f"TO '{directory / 'part.parquet'}' (FORMAT PARQUET)"
+    )
+    return str(directory / "*.parquet")
+
+
+def test_refresh_swaps_catalog_and_reports_changes(catalog, capsys):
+    new = {"people": catalog["people"], "extra": catalog["people"]}
+    conn = duckdb.connect(":memory:")
+    shell = Shell(conn, catalog, 100, 0, rediscover=lambda: dict(new))
+    shell.handle("\\refresh")
+    assert "Catalog refreshed: 2 tables (+1, -1)." in capsys.readouterr().out
+    assert shell.catalog is catalog  # swapped in place, so the completer sees it
+    assert sorted(catalog) == ["extra", "people"]
+    conn.close()
+
+
+def test_refresh_reregisters_changed_tables(catalog, tmp_path, capsys):
+    conn = duckdb.connect(":memory:")
+    moved = _write_people(tmp_path / "moved", [(9, "z")])
+    new = {"people": TableSpec(path=moved, format="parquet")}
+    shell = Shell(conn, catalog, 100, 0, rediscover=lambda: dict(new))
+    shell.handle("SELECT count(*) AS n FROM people;")
+    assert "3" in capsys.readouterr().out
+    shell.handle("\\refresh")
+    shell.handle("SELECT name FROM people;")
+    assert "z" in capsys.readouterr().out
+    conn.close()
+
+
+def test_refresh_drops_views_of_removed_tables(catalog, capsys):
+    conn = duckdb.connect(":memory:")
+    shell = Shell(conn, catalog, 100, 0, rediscover=lambda: {})
+    shell.handle("SELECT count(*) FROM people;")
+    shell.handle("\\refresh")
+    capsys.readouterr()
+    shell.handle("SELECT count(*) FROM people;")
+    assert "Error:" in capsys.readouterr().err
+    conn.close()
+
+
+def test_refresh_without_glue(shell, capsys):
+    shell.handle("\\refresh")
+    assert "Glue is disabled — nothing to refresh." in capsys.readouterr().out
+
+
+def test_refresh_failure_keeps_catalog(catalog, capsys):
+    conn = duckdb.connect(":memory:")
+
+    def broken():
+        raise RuntimeError("SSO session expired")
+
+    shell = Shell(conn, catalog, 100, 0, rediscover=broken)
+    shell.handle("\\refresh")
+    assert "Error: SSO session expired" in capsys.readouterr().err
+    assert sorted(catalog) == ["my-db__people", "people"]
+    conn.close()
+
+
+def test_completer_sees_names_added_later():
+    names = {"people": None}
+    completer = TableCompleter(names)
+    names["places"] = None
+    event = CompleteEvent(completion_requested=True)
+    found = [c.text for c in completer.get_completions(Document("FROM pla"), event)]
+    assert found == ["places"]

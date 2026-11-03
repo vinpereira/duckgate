@@ -16,13 +16,15 @@ from duckgate.config import Config
 CACHE_DIR = Path.home() / ".duckgate" / "cache"
 # bump whenever discovery would produce different TableSpecs for the same Glue tables,
 # so caches written by older versions are ignored instead of served for up to a TTL
-_CACHE_VERSION = 2
+_CACHE_VERSION = 3
 
 
 @dataclass
 class TableSpec:
     path: str
     format: str
+    # Athena's identifier ('"db"."table"') for Glue tables; None for [[sources]]
+    glue_table: str | None = None
 
 
 def discover_catalog(config: Config, refresh: bool = False) -> dict[str, TableSpec]:
@@ -104,6 +106,11 @@ def _discover_glue(config: Config) -> dict[str, TableSpec]:
                 if fmt == "iceberg":
                     # the exact current snapshot, no version-hint.text or guessing needed
                     loc = t.get("Parameters", {}).get("metadata_location") or loc
+                elif fmt == "delta":
+                    # Spark-registered tables keep the real root here; Location is often
+                    # a placeholder
+                    serde = t.get("StorageDescriptor", {}).get("SerdeInfo", {})
+                    loc = serde.get("Parameters", {}).get("path") or loc
                 rows.append((db, t["Name"], loc, fmt))
                 name_dbs.setdefault(t["Name"], []).append(db)
 
@@ -111,7 +118,7 @@ def _discover_glue(config: Config) -> dict[str, TableSpec]:
         if not loc:
             continue
         view_name = f"{db}__{name}" if len(name_dbs[name]) > 1 else name
-        tables[view_name] = TableSpec(path=loc, format=fmt)
+        tables[view_name] = TableSpec(path=loc, format=fmt, glue_table=f'"{db}"."{name}"')
     return tables
 
 
@@ -121,12 +128,17 @@ def ensure_registered(
     sql: str,
     registered: set[str],
 ) -> None:
-    for name, spec in catalog.items():
+    for name in referenced_tables(catalog, sql):
         if name in registered:
             continue
-        if re.search(rf"\b{re.escape(name)}\b", sql):
-            _try_register(conn, name, spec.path, spec.format)
-            registered.add(name)
+        spec = catalog[name]
+        _try_register(conn, name, spec.path, spec.format)
+        registered.add(name)
+
+
+def referenced_tables(catalog: dict[str, TableSpec], sql: str) -> list[str]:
+    """Catalog names that appear in sql as whole words, sorted."""
+    return sorted(name for name in catalog if re.search(rf"\b{re.escape(name)}\b", sql))
 
 
 def run_query(
@@ -148,6 +160,35 @@ def run_query(
             _try_register(conn, missing, spec.path, spec.format)
             registered.add(missing)
     raise RuntimeError("could not resolve all tables referenced by the query")
+
+
+def slow_query_hint(
+    catalog: dict[str, TableSpec],
+    sql: str,
+    elapsed: float,
+    timed_out: bool,
+    threshold_seconds: int,
+) -> str | None:
+    """A pointer to Athena for a query that timed out or ran past the threshold.
+
+    Only Glue tables are listed — Athena can't see [[sources]] — and a query that
+    references none gets no hint. A threshold of 0 disables the hint entirely.
+    """
+    if threshold_seconds <= 0 or (not timed_out and elapsed < threshold_seconds):
+        return None
+    glue_tables = [
+        catalog[name].glue_table
+        for name in referenced_tables(catalog, sql)
+        if catalog[name].glue_table
+    ]
+    if not glue_tables:
+        return None
+    took = f"was canceled after {elapsed:.0f}s" if timed_out else f"took {elapsed:.0f}s"
+    return (
+        f"Hint: this query {took}. Its Glue tables can run in-region on Athena "
+        f"(billed per data scanned): {', '.join(glue_tables)}. "
+        "Tables made of many small files are slow to scan from here."
+    )
 
 
 class QueryTimeoutError(Exception):
@@ -222,6 +263,8 @@ def apply_default_limit(sql: str, default_limit: int) -> str:
 def _try_register(conn: duckdb.DuckDBPyConnection, name: str, path: str, fmt: str) -> bool:
     try:
         conn.execute(_make_view_sql(name, path, fmt))
+    except duckdb.InterruptException:
+        raise  # timeout/Ctrl+C during registration — not a broken table
     except duckdb.Error as e:
         click.echo(f"\nWarning: skipping table '{name}': {e}", err=True)
         return False
@@ -231,6 +274,9 @@ def _try_register(conn: duckdb.DuckDBPyConnection, name: str, path: str, fmt: st
 def _source_expr(path: str, format: str) -> str:
     if format == "iceberg":
         return f"iceberg_scan('{path}')"
+    if format == "delta":
+        # the Delta log decides which files are live — globbing would read stale ones too
+        return f"delta_scan('{path}')"
     path = _with_glob(path, format)
     if format == "csv":
         return f"read_csv('{path}')"
@@ -270,8 +316,14 @@ def _detect_format(table: dict) -> str:
     # ones no longer in the current snapshot — stale and duplicated rows
     if table.get("TableType") == "ICEBERG":
         return "iceberg"
-    if table.get("Parameters", {}).get("table_type", "").upper() == "ICEBERG":
+    params = table.get("Parameters", {})
+    if params.get("table_type", "").upper() == "ICEBERG":
         return "iceberg"
+    # native Delta tables (Athena DDL, Glue crawler) vs. ones registered by Spark
+    if params.get("table_type", "").upper() == "DELTA":
+        return "delta"
+    if params.get("spark.sql.sources.provider", "").lower() == "delta":
+        return "delta"
     storage = table.get("StorageDescriptor", {})
     serde_lib = storage.get("SerdeInfo", {}).get("SerializationLibrary", "")
     if "json" in serde_lib.lower():

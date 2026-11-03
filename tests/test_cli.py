@@ -5,6 +5,7 @@ from botocore.credentials import Credentials, ReadOnlyCredentials
 from click.testing import CliRunner
 
 import duckgate
+from duckgate.catalog import TableSpec
 from duckgate.cli import cli
 
 
@@ -42,7 +43,7 @@ def test_cli_help(runner):
 
 
 def test_cli_version_constant():
-    assert duckgate.__version__ == "0.10.1"
+    assert duckgate.__version__ == "0.11.0"
 
 
 def test_tables_command_no_config(runner, tmp_path, monkeypatch):
@@ -264,3 +265,26 @@ def test_tables_notes_when_served_from_cache(runner, config_toml):
     assert result.exit_code == 0
     assert "cached 12m ago" in result.output
     assert "--refresh" in result.output
+
+
+def test_timed_out_query_prints_athena_hint_on_stderr(runner, config_toml):
+    catalog = {"events": TableSpec(path="unused", format="parquet", glue_table='"db"."events"')}
+    with (
+        patch(ENGINE_SESSION, return_value=_mock_session_no_glue()),
+        patch("duckgate.cli.discover_catalog", return_value=catalog),
+        patch("duckgate.catalog._try_register", return_value=True),
+    ):
+        result = runner.invoke(
+            cli,
+            [
+                "-q",
+                "SELECT count(*) FROM range(100000000) events, range(1000) t2",
+                "--limit",
+                "0",
+                "--timeout",
+                "1",
+            ],
+        )
+    assert result.exit_code == 1
+    assert '"db"."events"' in result.stderr
+    assert "Hint:" not in result.stdout

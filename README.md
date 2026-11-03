@@ -6,7 +6,7 @@
 [![Python versions](https://img.shields.io/pypi/pyversions/duckgate)](https://pypi.org/project/duckgate/)
 [![License](https://img.shields.io/pypi/l/duckgate)](https://github.com/vinpereira/duckgate/blob/main/LICENSE)
 
-Interactive SQL shell over S3 data (Parquet, Iceberg, CSV, JSON) using DuckDB.
+Interactive SQL shell over S3 data (Parquet, Iceberg, Delta Lake, CSV, JSON) using DuckDB.
 
 At its core, `duckgate` queries S3 Parquet/Iceberg directly through DuckDB's `httpfs` —
 no warehouse, no Athena, no data movement. That's the same engine-level trick behind
@@ -107,7 +107,9 @@ handy in scripts: `duckgate init --path duckgate.toml`.
 - End a statement with `;` to run it — Enter without one starts a new line, so multi-line
   queries can be typed or pasted as-is. Esc+Enter forces a submit; Ctrl+C discards the
   current input; Ctrl+D or `\q` exits.
-- `\tables` lists available tables; `\d <table>` shows a table's schema.
+- `\tables` lists available tables; `\d <table>` shows a table's schema; `\refresh`
+  re-discovers Glue tables without leaving the shell (`[[sources]]` and the AWS profile stay as
+  loaded at startup).
 - Tab completes table names (hyphenated names are inserted already quoted).
 - History persists across sessions in `~/.duckgate/history`.
 - `\limit N`/`\nolimit` and `\timeout N`/`\notimeout` — see [Query safety](#query-safety).
@@ -134,7 +136,7 @@ cache_ttl_seconds = 3600  # reuse discovered tables for 1h (default); 0 disables
 [[sources]]
 name   = "fis_location"
 path   = "s3://my-bucket/structured/sqlserver/dev/fis/location/**/*.parquet"
-format = "parquet"  # parquet | iceberg | csv | json
+format = "parquet"  # parquet | iceberg | delta | csv | json
 ```
 
 `[glue] enabled` defaults to `false` — `duckgate` works purely as a named-S3-sources tool with
@@ -147,6 +149,8 @@ explicitly (as in the example above) to also discover tables from Glue.
   enabled = true` is set. A bare Glue table location (no wildcard) is read as
   `location/**/*.<format>`. Iceberg tables are read from the catalog's current
   `metadata_location`, so you always get the table's current snapshot.
+  Delta tables (native `table_type = DELTA`, or registered by Spark) are read from the
+  table root through the Delta log, so only the current version's files are read.
 - **Local `[[sources]]`** entries override Glue tables with the same name — use this to point
   to a specific environment prefix, or to name S3 data that isn't in Glue at all.
 - If two Glue tables from different databases share a name, they are registered as
@@ -180,6 +184,12 @@ disabled), `--timeout N`, or the shell's `\timeout N`/`\notimeout`. Unlike the r
 *does* bound an aggregate's scan time — after N seconds the query is canceled outright
 (`Error: query canceled: exceeded Ns timeout`), regardless of what shape the query is.
 
+When a query that reads Glue tables times out or takes at least `[query] slow_hint_seconds`
+(default `60`, `0` disables it), `duckgate` prints a hint on stderr naming those tables as
+Athena identifiers (`"db"."table"`) — Athena runs in-region, which matters most for tables
+made of many small files, where every file is a separate S3 request. Nothing is run on
+Athena for you.
+
 ## AWS credentials
 
 Uses the AWS profile from `[aws] profile`, resolved via `boto3.Session(profile_name=...)`.
@@ -197,6 +207,7 @@ since a named profile lookup ignores ambient environment variables — configure
 | ------- | ----------------------------------------------------- |
 | Parquet | `read_parquet('s3://...')` via httpfs                |
 | Iceberg | `iceberg_scan('s3://...')` via the iceberg extension  |
+| Delta   | `delta_scan('s3://...')` via the delta extension (path = table root, parent of `_delta_log`) |
 | CSV     | `read_csv('s3://...')` via httpfs                     |
 | JSON    | `read_json('s3://...')` via httpfs (gzip auto-detected) |
 

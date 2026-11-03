@@ -1,5 +1,6 @@
 import re
 import signal
+import time
 from pathlib import Path
 
 import click
@@ -8,7 +9,7 @@ from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.history import FileHistory, InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings
 
-from duckgate.catalog import describe_table, run_script
+from duckgate.catalog import QueryTimeoutError, describe_table, run_script, slow_query_hint
 
 HISTORY_PATH = Path.home() / ".duckgate" / "history"
 
@@ -19,7 +20,7 @@ _PLAIN_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 _BANNER = (
     "duckgate  •  end SQL with ; to run  •  Tab completes table names  •  \\q to exit\n"
-    "\\tables  •  \\d <table>  •  \\limit N / \\nolimit  •  \\timeout N / \\notimeout"
+    "\\tables  •  \\d <table>  •  \\refresh  •  \\limit N / \\nolimit  •  \\timeout N / \\notimeout"
 )
 
 
@@ -30,8 +31,12 @@ def run_shell(
     default_timeout,
     credentials=None,
     history_path=HISTORY_PATH,
+    slow_hint_seconds=0,
+    rediscover=None,
 ):
-    shell = Shell(conn, catalog, default_limit, default_timeout, credentials)
+    shell = Shell(
+        conn, catalog, default_limit, default_timeout, credentials, slow_hint_seconds, rediscover
+    )
     session = PromptSession(
         history=_make_history(history_path),
         multiline=True,
@@ -56,12 +61,24 @@ def run_shell(
 
 
 class Shell:
-    def __init__(self, conn, catalog, default_limit, default_timeout, credentials=None):
+    def __init__(
+        self,
+        conn,
+        catalog,
+        default_limit,
+        default_timeout,
+        credentials=None,
+        slow_hint_seconds=0,
+        rediscover=None,
+    ):
         self.conn = conn
         self.catalog = catalog
         self.limit = default_limit
         self.timeout = default_timeout
         self.credentials = credentials
+        self.slow_hint_seconds = slow_hint_seconds
+        # re-runs Glue discovery bypassing the cache; None when Glue is disabled
+        self.rediscover = rediscover
         self.registered = set()
 
     def handle(self, text: str) -> bool:
@@ -105,8 +122,31 @@ class Shell:
                 click.echo(table)
         elif name == "\\d":
             self._describe(args)
+        elif name == "\\refresh":
+            self._refresh()
         else:
             click.echo(f"Unknown command: {command.split()[0]}", err=True)
+
+    def _refresh(self) -> None:
+        if self.rediscover is None:
+            click.echo("Glue is disabled — nothing to refresh.")
+            return
+        try:
+            new = self.rediscover()
+        except Exception as e:
+            click.echo(f"Error: {e}", err=True)
+            return
+        added = new.keys() - self.catalog.keys()
+        removed = self.catalog.keys() - new.keys()
+        for table in removed & self.registered:
+            quoted = '"' + table.replace('"', '""') + '"'
+            self.conn.execute(f"DROP VIEW IF EXISTS {quoted}")
+        # swap in place: the completer holds a reference to this same dict
+        self.catalog.clear()
+        self.catalog.update(new)
+        # views re-register on next use, picking up any changed path/format
+        self.registered.clear()
+        click.echo(f"Catalog refreshed: {len(new)} tables (+{len(added)}, -{len(removed)}).")
 
     def _describe(self, args: list[str]) -> None:
         if len(args) != 1:
@@ -124,12 +164,23 @@ class Shell:
             click.echo(f"Error: {e}", err=True)
 
     def _query(self, text: str) -> None:
+        start = time.monotonic()
+        timed_out = False
         try:
             self._apply_credentials()
             df = _execute(self.conn, self.catalog, self.registered, text, self.timeout, self.limit)
             click.echo("(0 rows)" if df.empty else df.to_string(index=False))
+        except QueryTimeoutError as e:
+            timed_out = True
+            click.echo(f"Error: {e}", err=True)
         except Exception as e:
             click.echo(f"Error: {e}", err=True)
+            return
+        hint = slow_query_hint(
+            self.catalog, text, time.monotonic() - start, timed_out, self.slow_hint_seconds
+        )
+        if hint:
+            click.echo(hint, err=True)
 
     def _apply_credentials(self) -> None:
         if self.credentials is not None:
@@ -138,12 +189,12 @@ class Shell:
 
 class TableCompleter(Completer):
     def __init__(self, names):
-        self.names = sorted(names)
+        self.names = names  # read live, so names added by \refresh complete too
 
     def get_completions(self, document, complete_event):
         prefix = _PREFIX.search(document.text_before_cursor).group()
         typed = prefix.lstrip('"').lower()
-        for name in self.names:
+        for name in sorted(self.names):
             if name.lower().startswith(typed):
                 # unquoted hyphens parse as subtraction, so insert those names quoted
                 text = name if _PLAIN_IDENTIFIER.fullmatch(name) else f'"{name}"'

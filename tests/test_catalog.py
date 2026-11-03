@@ -1,5 +1,5 @@
 import time
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import boto3
 import duckdb
@@ -17,9 +17,11 @@ from duckgate.catalog import (
     discover_catalog,
     ensure_registered,
     glue_cache_age,
+    referenced_tables,
     run_query,
     run_query_with_timeout,
     run_script,
+    slow_query_hint,
 )
 from duckgate.config import AwsConfig, Config, GlueConfig, SourceConfig
 
@@ -177,7 +179,11 @@ def test_discover_catalog_glue_tables():
     )
     with patch("duckgate.catalog.boto3.Session", return_value=boto3.Session()):
         catalog = discover_catalog(config)
-    assert catalog == {"locations": TableSpec(path="s3://bucket/locations/", format="parquet")}
+    assert catalog == {
+        "locations": TableSpec(
+            path="s3://bucket/locations/", format="parquet", glue_table='"my_db"."locations"'
+        )
+    }
 
 
 @mock_aws
@@ -744,7 +750,9 @@ def test_glue_iceberg_table_reads_current_metadata_file():
         TableInput=_glue_iceberg_table_input("events", "s3://b/events", metadata),
     )
     catalog = _discover(_glue_config(ttl=0))
-    assert catalog["events"] == TableSpec(path=metadata, format="iceberg")
+    assert catalog["events"] == TableSpec(
+        path=metadata, format="iceberg", glue_table='"my_db"."events"'
+    )
 
 
 @mock_aws
@@ -755,7 +763,9 @@ def test_glue_iceberg_table_without_metadata_location_uses_table_location():
         DatabaseName="my_db", TableInput=_glue_iceberg_table_input("events", "s3://b/events")
     )
     catalog = _discover(_glue_config(ttl=0))
-    assert catalog["events"] == TableSpec(path="s3://b/events", format="iceberg")
+    assert catalog["events"] == TableSpec(
+        path="s3://b/events", format="iceberg", glue_table='"my_db"."events"'
+    )
 
 
 @mock_aws
@@ -765,3 +775,182 @@ def test_cache_from_an_older_format_version_is_ignored(monkeypatch):
     monkeypatch.setattr("duckgate.catalog._CACHE_VERSION", 999)
     with pytest.raises(AssertionError, match="Glue was called"):
         _discover_without_glue_access(_glue_config())
+
+
+# --- Athena identifiers and referenced tables (v0.11.0) ---
+
+
+@mock_aws
+def test_glue_tables_carry_their_athena_identifier():
+    _create_glue_table("locations")
+    catalog = _discover(_glue_config(ttl=0))
+    assert catalog["locations"].glue_table == '"my_db"."locations"'
+
+
+@mock_aws
+def test_sources_have_no_glue_identifier():
+    source = SourceConfig(name="mine", path="s3://one/*.parquet")
+    _create_glue_table("locations")
+    assert _discover(_glue_config(ttl=0, sources=[source]))["mine"].glue_table is None
+
+
+def test_referenced_tables_matches_whole_names_only():
+    catalog = {
+        "people": TableSpec(path="p", format="parquet"),
+        "people_archive": TableSpec(path="a", format="parquet"),
+        "my-db__events": TableSpec(path="e", format="parquet"),
+    }
+    assert referenced_tables(catalog, "SELECT * FROM people_archive") == ["people_archive"]
+    sql = 'SELECT * FROM people JOIN "my-db__events" USING (id)'
+    assert referenced_tables(catalog, sql) == ["my-db__events", "people"]
+
+
+# --- Athena hint ---
+
+_HINT_CATALOG = {
+    "events": TableSpec(path="e", format="iceberg", glue_table='"db"."events"'),
+    "trips": TableSpec(path="t", format="parquet", glue_table='"db"."trips"'),
+    "mine": TableSpec(path="m", format="parquet"),
+}
+
+
+def test_no_hint_below_threshold():
+    assert slow_query_hint(_HINT_CATALOG, "SELECT * FROM events", 59, False, 60) is None
+
+
+def test_hint_at_threshold_lists_referenced_glue_tables():
+    hint = slow_query_hint(_HINT_CATALOG, "SELECT * FROM events JOIN mine", 84, False, 60)
+    assert hint.startswith("Hint: this query took 84s.")
+    assert '"db"."events"' in hint
+    assert '"db"."trips"' not in hint  # not referenced
+    assert "Athena" in hint
+
+
+def test_hint_on_timeout_regardless_of_elapsed():
+    hint = slow_query_hint(_HINT_CATALOG, "SELECT * FROM trips", 5, True, 60)
+    assert hint.startswith("Hint: this query was canceled after 5s.")
+
+
+def test_no_hint_for_sources_only_queries():
+    assert slow_query_hint(_HINT_CATALOG, "SELECT * FROM mine", 300, True, 60) is None
+
+
+def test_zero_threshold_disables_hint():
+    assert slow_query_hint(_HINT_CATALOG, "SELECT * FROM events", 300, True, 0) is None
+
+
+# --- Delta Lake (v0.11.0) ---
+
+
+@pytest.mark.parametrize(
+    "params",
+    [{"table_type": "DELTA"}, {"table_type": "delta"}, {"spark.sql.sources.provider": "delta"}],
+)
+def test_detect_format_delta(params):
+    assert _detect_format({"TableType": "EXTERNAL_TABLE", "Parameters": params}) == "delta"
+
+
+def test_delta_source_expr_never_globs():
+    assert _source_expr("s3://b/events/", "delta") == "delta_scan('s3://b/events/')"
+
+
+@mock_aws
+def test_glue_native_delta_table_uses_its_location():
+    glue = boto3.client("glue", region_name="eu-central-1")
+    glue.create_database(DatabaseInput={"Name": "my_db"})
+    glue.create_table(
+        DatabaseName="my_db",
+        TableInput={
+            "Name": "events",
+            "StorageDescriptor": {"Location": "s3://b/events/", "Columns": []},
+            "TableType": "EXTERNAL_TABLE",
+            "Parameters": {"table_type": "DELTA"},
+        },
+    )
+    spec = _discover(_glue_config(ttl=0))["events"]
+    assert (spec.path, spec.format) == ("s3://b/events/", "delta")
+
+
+@mock_aws
+def test_glue_spark_registered_delta_table_uses_serde_path():
+    glue = boto3.client("glue", region_name="eu-central-1")
+    glue.create_database(DatabaseInput={"Name": "my_db"})
+    glue.create_table(
+        DatabaseName="my_db",
+        TableInput={
+            "Name": "events",
+            "StorageDescriptor": {
+                "Location": "s3://b/events-__PLACEHOLDER__",
+                "Columns": [],
+                "SerdeInfo": {"Parameters": {"path": "s3://b/events"}},
+            },
+            "TableType": "EXTERNAL_TABLE",
+            "Parameters": {"spark.sql.sources.provider": "delta"},
+        },
+    )
+    spec = _discover(_glue_config(ttl=0))["events"]
+    assert (spec.path, spec.format) == ("s3://b/events", "delta")
+
+
+@pytest.fixture
+def delta_table(tmp_path):
+    import pyarrow as pa
+    from deltalake import write_deltalake
+
+    path = str(tmp_path / "events")
+    write_deltalake(path, pa.table({"id": [1, 2, 3], "v": ["old"] * 3}))
+    write_deltalake(path, pa.table({"id": [10, 20], "v": ["new"] * 2}), mode="overwrite")
+    return path
+
+
+def test_delta_table_reads_only_the_current_version(duck_conn, delta_table):
+    catalog = {"events": TableSpec(path=delta_table, format="delta")}
+    rows = run_script(duck_conn, catalog, "SELECT id, v FROM events ORDER BY id", set(), 0, 0)
+    assert rows.fetchall() == [(10, "new"), (20, "new")]
+
+
+def test_describe_delta_table(duck_conn, delta_table):
+    spec = TableSpec(path=delta_table, format="delta")
+    columns = [row[0] for row in describe_table(duck_conn, spec).fetchall()]
+    assert columns == ["id", "v"]
+
+
+def test_delta_table_on_s3(duck_conn, delta_table, moto_server):
+    import os
+
+    s3 = boto3.client(
+        "s3",
+        region_name="eu-central-1",
+        endpoint_url=f"http://{moto_server}",
+        aws_access_key_id="test",
+        aws_secret_access_key="test",
+    )
+    s3.create_bucket(
+        Bucket="lake", CreateBucketConfiguration={"LocationConstraint": "eu-central-1"}
+    )
+    for directory, _, files in os.walk(delta_table):
+        for name in files:
+            full = os.path.join(directory, name)
+            s3.upload_file(full, "lake", "events/" + os.path.relpath(full, delta_table))
+    # same secret shape engine.py creates, plus the moto endpoint
+    duck_conn.execute(
+        "CREATE SECRET (TYPE s3, KEY_ID ?, SECRET ?, SESSION_TOKEN ?, REGION ?, ENDPOINT ?, "
+        "USE_SSL false, URL_STYLE 'path')",
+        ["test", "test", "", "eu-central-1", moto_server],
+    )
+    catalog = {"events": TableSpec(path="s3://lake/events", format="delta")}
+    rows = run_script(duck_conn, catalog, "SELECT id FROM events ORDER BY id", set(), 0, 0)
+    assert rows.fetchall() == [(10,), (20,)]
+
+
+def test_interrupt_during_view_registration_is_a_timeout_not_a_skip(capsys):
+    # the timeout timer also covers lazy view registration; an interrupt there must
+    # surface as the timeout, not as "skipping table" + a misleading "does not exist"
+    conn = MagicMock()
+    conn.execute.side_effect = duckdb.InterruptException("Interrupted!")
+    catalog = {"events": TableSpec(path="s3://b/events/meta.json", format="iceberg")}
+    registered = set()
+    with pytest.raises(duckdb.InterruptException):
+        ensure_registered(conn, catalog, "SELECT * FROM events", registered)
+    assert registered == set()
+    assert "skipping table" not in capsys.readouterr().err

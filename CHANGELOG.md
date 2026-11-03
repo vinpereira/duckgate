@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-03
+
+### Added
+
+- Delta Lake tables: `[[sources]] format = "delta"` (path = the table root, the parent of
+  `_delta_log`) and Glue tables marked as Delta — native ones (`table_type = DELTA`, from
+  Athena DDL or a Glue crawler) and Spark-registered ones (`spark.sql.sources.provider =
+  delta`, whose real path lives in the SerDe parameters). Read with `delta_scan()`, so only
+  the current version's files are read. DuckDB's `delta` extension is autoloaded on first use.
+- A hint on stderr when a query that reads Glue tables times out or runs for at least
+  `[query] slow_hint_seconds` (new, default `60`, `0` disables it), naming those tables as
+  Athena identifiers (`"db"."table"`). Nothing is run on Athena.
+- `\refresh` in the shell re-discovers Glue tables (bypassing the cache), shows how many were
+  added/removed, and makes new names available to Tab completion right away.
+
+### Changed
+
+- The Glue catalog cache format changed; caches from 0.10.x are rebuilt on first use.
+
+### Fixed
+
+- A timeout (or Ctrl+C) that fired while a table's view was still being registered — Iceberg
+  tables read their metadata at that point — was reported as "skipping table" followed by a
+  misleading "table does not exist" error. It now cancels the query like any other timeout.
+
 ## [0.10.1] - 2026-10-16
 
 ### Fixed

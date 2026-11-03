@@ -1,10 +1,18 @@
 import sys
+import time
 from dataclasses import replace
 from pathlib import Path
 
 import click
 
-from duckgate.catalog import describe_table, discover_catalog, glue_cache_age, run_script
+from duckgate.catalog import (
+    QueryTimeoutError,
+    describe_table,
+    discover_catalog,
+    glue_cache_age,
+    run_script,
+    slow_query_hint,
+)
 from duckgate.config import find_config, load_config
 from duckgate.engine import S3Credentials, create_connection
 
@@ -88,6 +96,7 @@ def cli(
     )
 
     if query_str is not None:
+        start = time.monotonic()
         try:
             df = run_script(
                 conn, catalog, query_str, set(), effective_timeout, effective_limit
@@ -98,13 +107,28 @@ def cli(
                 click.echo(df.to_json(orient="records", indent=2))
             else:
                 click.echo(df.to_string(index=False))
+        except QueryTimeoutError as e:
+            click.echo(f"Error: {e}", err=True)
+            _echo_slow_hint(catalog, query_str, start, True, config.query.slow_hint_seconds)
+            raise SystemExit(1) from e
         except Exception as e:
             click.echo(f"Error: {e}", err=True)
             raise SystemExit(1) from e
+        _echo_slow_hint(catalog, query_str, start, False, config.query.slow_hint_seconds)
     else:
         from duckgate.shell import run_shell
 
-        run_shell(conn, catalog, effective_limit, effective_timeout, credentials)
+        run_shell(
+            conn,
+            catalog,
+            effective_limit,
+            effective_timeout,
+            credentials,
+            slow_hint_seconds=config.query.slow_hint_seconds,
+            rediscover=(
+                (lambda: discover_catalog(config, refresh=True)) if config.glue.enabled else None
+            ),
+        )
 
 
 @cli.command()
@@ -157,6 +181,12 @@ def describe(name, refresh):
         raise SystemExit(1) from e
 
 
+def _echo_slow_hint(catalog, sql, start, timed_out, threshold_seconds):
+    hint = slow_query_hint(catalog, sql, time.monotonic() - start, timed_out, threshold_seconds)
+    if hint:
+        click.echo(hint, err=True)
+
+
 def _format_age(seconds: float) -> str:
     if seconds < 60:
         return f"{int(seconds)}s"
@@ -204,11 +234,12 @@ def init_cmd(path_str):
         "# [[sources]]\n"
         '# name   = "my_table"\n'
         '# path   = "s3://my-bucket/prefix/**/*.parquet"\n'
-        '# format = "parquet"  # parquet | iceberg | csv | json\n'
+        '# format = "parquet"  # parquet | iceberg | delta | csv | json\n'
         "\n"
         "# [query]\n"
         "# default_limit   = 100  # 0 disables auto-limiting queries with no LIMIT\n"
         "# timeout_seconds = 0    # cancel a query after N seconds (0 = no timeout)\n"
+        "# slow_hint_seconds = 60 # suggest Athena for queries this slow (0 = never)\n"
     )
     path.write_text(template)
     click.echo(f"Created {path}")
