@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- Development and CI now run on DuckDB 2.0.0 (lockfile), which is what a fresh install
+  resolves to; the supported range is unchanged (`>=1.3.0`, still tested by the floor job).
+
+### Docs
+
+- README: DuckDB 2.0 recommended (asynchronous I/O made a ~4,500-file Iceberg table ~6x faster
+  from a laptop), how its SQL changes (arrow lambdas, `~` partial matching, integer division
+  by zero) affect queries run through `duckgate`, and how to stay on DuckDB 1.x.
+
 ## [0.11.0] - 2026-11-03
 
 ### Added

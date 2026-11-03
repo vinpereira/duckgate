@@ -81,6 +81,24 @@ uv tool install duckgate
 pipx install duckgate
 ```
 
+### DuckDB version
+
+`duckgate` runs your SQL unchanged on whichever DuckDB it's installed with — 1.3.0 or newer,
+and a fresh install gets the latest (2.x). DuckDB 2.0 is recommended: its asynchronous I/O
+keeps many S3 requests in flight, which matters most for tables made of many small files —
+one real ~4,500-file Iceberg table went from ~84s on DuckDB 1.5 to ~13s on 2.0 from a laptop.
+
+DuckDB 2.0 also changed some SQL semantics, and they apply to queries run through `duckgate`
+too. The ones most likely to break a saved query:
+
+- Arrow lambdas `x -> x + 1` are rejected; write `lambda x : x + 1`.
+- `~` / `!~` match partially: `'abc' ~ 'b'` is now `true`.
+- Integer division or modulo by zero (`//`, `%`) raises an error instead of returning `NULL`;
+  wrap it in `TRY(...)`.
+
+Full list in DuckDB's [2.0 migration guide](https://duckdb.org/docs/2.0/operations_manual/migration.html).
+To stay on DuckDB 1.x: `uv tool install duckgate --with "duckdb<2"`.
+
 ## Quick start
 
 ```bash
